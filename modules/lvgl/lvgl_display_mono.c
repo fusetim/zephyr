@@ -49,8 +49,8 @@ static ALWAYS_INLINE void set_px_at_pos(uint8_t *dst_buf, uint32_t x, uint32_t y
 #endif
 }
 
-static void lvgl_transform_buffer(uint8_t **px_map, uint32_t width, uint32_t height,
-				  const struct display_capabilities *caps)
+static uint8_t *lvgl_transform_buffer(uint8_t *px_map, uint32_t width, uint32_t height,
+				      const struct display_capabilities *caps)
 {
 #ifdef CONFIG_LV_Z_COLOR_MONO_HW_INVERSION
 	uint8_t clear_color = 0x00;
@@ -61,9 +61,7 @@ static void lvgl_transform_buffer(uint8_t **px_map, uint32_t width, uint32_t hei
 	memset(mono_conv_buf, clear_color, mono_conv_buf_size);
 
 	/* Needed because LVGL reserves some bytes in the buffer for the color palette. */
-	*px_map += COLOR_PALETTE_HEADER_SIZE;
-
-	uint8_t *src_buf = *px_map;
+	uint8_t *src_buf = px_map + COLOR_PALETTE_HEADER_SIZE;
 	uint32_t stride = (width + CONFIG_LV_DRAW_BUF_STRIDE_ALIGN - 1) &
 			  ~(CONFIG_LV_DRAW_BUF_STRIDE_ALIGN - 1);
 
@@ -78,8 +76,38 @@ static void lvgl_transform_buffer(uint8_t **px_map, uint32_t width, uint32_t hei
 		}
 	}
 
-	memcpy(src_buf, mono_conv_buf, mono_conv_buf_size - COLOR_PALETTE_HEADER_SIZE);
+	return mono_conv_buf;
 }
+
+#if defined(CONFIG_LV_Z_DIRECT_RENDERING)
+
+void lvgl_flush_cb_mono(lv_display_t *display, const lv_area_t *area, uint8_t *px_map)
+{
+	struct lvgl_disp_data *data = (struct lvgl_disp_data *)lv_display_get_user_data(display);
+
+	/* Ignore partial flushes in direct rendering mode */
+	if (lv_display_flush_is_last(display) == false) {
+		lv_display_flush_ready(display);
+		return;
+	}
+
+	uint16_t w = lv_display_get_original_horizontal_resolution(display);
+	uint16_t h = lv_display_get_original_vertical_resolution(display);
+
+	uint8_t *dst = lvgl_transform_buffer(px_map, w, h, &data->cap);
+
+	struct display_buffer_descriptor desc = {.buf_size = (w * h) / 8U,
+						 .width = w,
+						 .pitch = w,
+						 .height = h,
+						 .frame_incomplete = false};
+
+	display_write(data->display_dev, 0, 0, &desc, (void *)dst);
+
+	lv_display_flush_ready(display);
+}
+
+#else
 
 void lvgl_flush_cb_mono(lv_display_t *display, const lv_area_t *area, uint8_t *px_map)
 {
@@ -89,8 +117,7 @@ void lvgl_flush_cb_mono(lv_display_t *display, const lv_area_t *area, uint8_t *p
 	const struct device *display_dev = data->display_dev;
 	const bool is_epd = data->cap.screen_info & SCREEN_INFO_EPD;
 	const bool is_last = lv_display_flush_is_last(display);
-
-	lvgl_transform_buffer(&px_map, w, h, &data->cap);
+	uint8_t *dst = lvgl_transform_buffer(px_map, w, h, &data->cap);
 
 	if (is_epd && !data->blanking_on && !is_last) {
 		/*
@@ -111,9 +138,9 @@ void lvgl_flush_cb_mono(lv_display_t *display, const lv_area_t *area, uint8_t *p
 		.frame_incomplete = !is_last,
 	};
 
-	display_write(display_dev, area->x1, area->y1, &desc, (void *)px_map);
+	display_write(display_dev, area->x1, area->y1, &desc, (void *)dst);
 	if (data->cap.screen_info & SCREEN_INFO_DOUBLE_BUFFER) {
-		display_write(display_dev, area->x1, area->y1, &desc, (void *)px_map);
+		display_write(display_dev, area->x1, area->y1, &desc, (void *)dst);
 	}
 
 	if (is_epd && is_last && data->blanking_on) {
@@ -127,6 +154,8 @@ void lvgl_flush_cb_mono(lv_display_t *display, const lv_area_t *area, uint8_t *p
 
 	lv_display_flush_ready(display);
 }
+
+#endif /* CONFIG_LV_Z_DIRECT_RENDERING */
 
 void lvgl_rounder_cb_mono(lv_event_t *e)
 {

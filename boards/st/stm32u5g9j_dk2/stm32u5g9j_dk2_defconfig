@@ -16,3 +16,7 @@ CONFIG_UART_CONSOLE=y
 
 # Enable GPIO
 CONFIG_GPIO=y
+
+# TODO: Remove this - but for now, it is needed to ensure proper 
+# alignment of LVGL buffers when using the Nema GFX library.
+CONFIG_LV_ATTRIBUTE_MEM_ALIGN_SIZE=4

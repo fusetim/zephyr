@@ -22,7 +22,14 @@ else()
   message(FATAL_ERROR "Unsupported NemaGFX lib")
 endif()
 
+if(CONFIG_FP_HARDABI) 
 zephyr_library_link_libraries(
   nemagfx-float-abi-hard
   -L${LVGL_DIR}/libs/nema_gfx/lib/core/${NEMA_LIB_DIR}
 )
+else()
+zephyr_library_link_libraries(
+  nemagfx
+  -L${LVGL_DIR}/libs/nema_gfx/lib/core/${NEMA_LIB_DIR}
+)
+endif()

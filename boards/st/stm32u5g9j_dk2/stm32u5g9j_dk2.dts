@@ -393,3 +393,7 @@ zephyr_udc0: &usbotg_hs {
 &vbat4 {
 	status = "okay";
 };
+
+&gpu2d {
+	status = "okay";
+};

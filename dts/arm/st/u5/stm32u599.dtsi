@@ -51,5 +51,15 @@
 			#size-cells = <0>;
 			status = "disabled";
 		};
+
+		gpu2d: gpu@4002F000 {
+			compatible = "st,neochrom-gpu2d";
+			reg = <0x4002F000 0x1000>;
+			clocks = <&rcc STM32_CLOCK(AHB1, 20)>;
+			interrupts = <132 0>, <133 0>;
+			interrupt-names = "gpu2d", "gpu2d_er";
+			resets = <&rctl STM32_RESET(AHB1, 20)>;
+			status = "disabled";
+        };
 	};
 };

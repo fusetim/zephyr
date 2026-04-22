@@ -21,8 +21,6 @@
 #include <zephyr/kernel.h>
 #include <zephyr/sys/sys_io.h>
 
-#include "tsi_malloc.h"
-
 /********** Devicetree **********/
 
 #define GPU2D_NODE		DT_INST(0, st_neochrom_gpu2d)
@@ -58,7 +56,7 @@ struct zephyr_nemagfx_runtime {
 
 /********** Static Variables **********/
 
-static uint8_t nemagfx_pool_mem[NEMAGFX_MEM_POOL_SIZE];
+K_HEAP_DEFINE_NOCACHE(nemagfx_heap, NEMAGFX_MEM_POOL_SIZE);
 static nema_ringbuffer_t ring_buffer_str;
 
 static struct zephyr_nemagfx_runtime gpu2d_rt;
@@ -129,17 +127,6 @@ int32_t nema_sys_init(void)
 		return ret;
 	}
 
-	error_code = tsi_malloc_init_pool_aligned(0,
-						  (void *)nemagfx_pool_mem,
-						  (uintptr_t)nemagfx_pool_mem,
-						  NEMAGFX_MEM_POOL_SIZE,
-						  1, 8);
-
-	if (error_code < 0) {
-		LV_LOG_ERROR("Unable to initialize NemaGFX pool memory");
-		return error_code;
-	}
-
 	ring_buffer_str.bo = nema_buffer_create(RING_SIZE);
 
 	if (ring_buffer_str.bo.base_virt == NULL) {
@@ -178,19 +165,19 @@ int nema_wait_irq_cl(int cl_id)
 
 void nema_host_free(void *ptr)
 {
-	tsi_free(ptr);
+	k_heap_free(&nemagfx_heap, ptr);
 }
 
 void *nema_host_malloc(unsigned int size)
 {
-	return tsi_malloc(size);
+	return k_heap_aligned_alloc(&nemagfx_heap, 4, size, K_NO_WAIT);
 }
 
 nema_buffer_t nema_buffer_create(int size)
 {
 	nema_buffer_t bo = { 0 };
 
-	bo.base_virt = tsi_malloc(size);
+	bo.base_virt = k_heap_aligned_alloc(&nemagfx_heap, 4, size, K_NO_WAIT);
 	bo.base_phys = (uintptr_t)bo.base_virt;
 	bo.size = size;
 	bo.fd = -1;
@@ -230,7 +217,7 @@ void nema_buffer_destroy(nema_buffer_t *bo)
 		return;
 	}
 
-	tsi_free(bo->base_virt);
+	k_heap_free(&nemagfx_heap, bo->base_virt);
 
 	bo->base_virt = NULL;
 	bo->base_phys = 0U;

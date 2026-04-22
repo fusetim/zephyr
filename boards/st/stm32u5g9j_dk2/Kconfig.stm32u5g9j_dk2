@@ -3,3 +3,21 @@
 
 config BOARD_STM32U5G9J_DK2
 	select SOC_STM32U5G9XX
+
+# Enable Neochrom GPU2D graphic acceleration using nemaGFX
+if LVGL
+
+config GRAPHICS_ACCELERATOR
+	default y
+
+if NEOCHROM_GPU2D
+
+config LV_USE_NEMA_GFX
+	default y
+
+config LV_USE_NEMA_LIB
+	default 2
+
+endif # NEOCHROM_GPU2D
+
+endif #LVGL

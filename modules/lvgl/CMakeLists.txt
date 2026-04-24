@@ -442,6 +442,14 @@ zephyr_library_sources(
     lvgl_zephyr_osal.c
 )
 
+if(CONFIG_LV_USE_THORVG_INTERNAL)
+    FILE(GLOB LVGL_THORVG_SRC ${LVGL_DIR}/src/libs/thorvg/*.cpp)
+
+    message(STATUS "Enabling the building of ThorVG internal")
+    
+    zephyr_library_sources(${LVGL_THORVG_SRC})
+endif()
+
 zephyr_library_sources_ifdef(CONFIG_LV_Z_USE_FILESYSTEM lvgl_fs.c)
 zephyr_library_sources_ifdef(CONFIG_LV_Z_MEM_POOL_SYS_HEAP lvgl_mem.c)
 zephyr_library_sources_ifdef(CONFIG_LV_Z_SHELL      lvgl_shell.c)

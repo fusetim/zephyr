@@ -1,0 +1,87 @@
+/ {
+    pwmleds: pwmleds {
+	    compatible = "pwm-leds"; 
+        status = "okay"; 
+        pwmbacklight: pwmbacklight {
+            pwms = < &pwm3 4 PWM_KHZ(100) PWM_POLARITY_NORMAL>;
+        };
+    };
+
+    aliases {
+		pwm-led0 = &pwmbacklight;
+	};
+
+    chosen {
+		zephyr,touch = &tsc2013;
+    };
+};
+
+
+&gt911 {
+		status = "disabled";
+};
+
+&i2c2 {
+    status = "okay";
+    tsc2013: tsc2013@48 {
+		compatible = "ti,tsc2013";
+        status = "okay";
+		reg = <0x48>;
+		irq-gpios = <&gpioe 5 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&gpiod 2 GPIO_ACTIVE_LOW>;
+    };
+};
+
+// Enable PWM on Timer 3 / Channel 4 for BL_CTRL (PE6)
+&timers3 {
+    status = "okay";
+    st,prescaler = < 16 >;  // Prescaler = 16000 (160Mhz -> 10MHz)
+
+    pwm3: pwm {
+        status = "okay";
+        pinctrl-0 = < &tim3_ch4_pe6 >;
+        pinctrl-names = "default";
+    };
+};
+
+&ltdc {
+    status = "okay";
+
+    /delete-property/ disp-on-gpios;  
+    // Disable ON-OFF backlight, for a better approach using PWM
+    /delete-property/ bl-ctrl-gpios;
+
+    pinctrl-0 = <&ltdc_r0_pc6 &ltdc_r1_pc7 &ltdc_r2_pe15 &ltdc_r3_pd8
+	     &ltdc_r4_pd9 &ltdc_r5_pd10 &ltdc_r6_pd11 &ltdc_r7_pd12
+	     &ltdc_g0_pc8 &ltdc_g1_pc9 &ltdc_g2_pe9 &ltdc_g3_pe10
+	     &ltdc_g4_pe11 &ltdc_g5_pe12 &ltdc_g6_pe13 &ltdc_g7_pe14
+	     &ltdc_b0_pb9 &ltdc_b1_pb2 &ltdc_b2_pd14 &ltdc_b3_pd15
+	     &ltdc_b4_pd0 &ltdc_b5_pd1 &ltdc_b6_pe7 &ltdc_b7_pe8
+	     &ltdc_clk_pd3 &ltdc_hsync_pe0 &ltdc_vsync_pd13>;
+
+    width = <320>;
+	height = <240>;
+	pixel-format = <PANEL_PIXEL_FORMAT_RGB_888>;
+
+	def-back-color-red = <0x00>;
+	def-back-color-green = <0xFF>;
+	def-back-color-blue = <0x00>;
+
+	display-timings {
+		compatible = "zephyr,panel-timing";
+        clock-frequency = <4000000>;
+        
+        hsync-len = <409>;
+        hback-porch = <68>;
+        hfront-porch = <20>;
+
+        vsync-len = <263>;
+        vback-porch = <18>;
+        vfront-porch = <4>;
+
+        de-active = <0>;
+        hsync-active = <1>;
+        vsync-active = <1>;
+		pixelclk-active = <1>;
+	};
+};

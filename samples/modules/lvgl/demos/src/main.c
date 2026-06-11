@@ -6,6 +6,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/drivers/pwm.h>
 #include <lvgl.h>
 #include <lvgl_mem.h>
 #include <lvgl_zephyr.h>
@@ -18,12 +19,24 @@ LOG_MODULE_REGISTER(app);
 
 int main(void)
 {
+ 	const struct pwm_dt_spec pwm_led0 = PWM_DT_SPEC_GET(DT_ALIAS(pwm_led0));
+		if (!pwm_is_ready_dt(&pwm_led0)) {
+		printk("Error: PWM device %s is not ready\n",
+		       pwm_led0.dev->name);
+		return 0;
+	}
+    uint32_t max_period = PWM_USEC(100);
+    int ret = pwm_set_dt(&pwm_led0, max_period, max_period / 2U);
+	if (ret) {
+		printk("Error %d: failed to set pulse width\n", ret);
+		return 0;
+	}
+
 	const struct device *display_dev;
 #ifdef CONFIG_LV_Z_DEMO_RENDER_SCENE_DYNAMIC
 	k_timepoint_t next_scene_switch;
 	lv_demo_render_scene_t cur_scene = LV_DEMO_RENDER_SCENE_FILL;
 #endif /* CONFIG_LV_Z_DEMO_RENDER_SCENE_DYNAMIC */
-	int ret;
 
 	display_dev = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 	if (!device_is_ready(display_dev)) {

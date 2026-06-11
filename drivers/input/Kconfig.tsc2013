@@ -1,0 +1,28 @@
+# Copyright (c) 2025 Timothée BRILLAUD
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig INPUT_TSC2013
+	bool "TSC2013 Resistive 4-wire touch panel driver"
+	default y
+	depends on DT_HAS_TI_TSC2013_ENABLED
+	select I2C
+	select INPUT_TOUCH
+	help
+	  Enable driver for the TSC2013 resistive touch panel controllers.
+
+if INPUT_TSC2013
+
+config INPUT_TSC2013_PERIOD_MS
+	int "Sample period"
+	depends on !INPUT_TSC2013_INTERRUPT
+	default 10
+	help
+	  Sample period in milliseconds when in polling mode.
+
+config INPUT_TSC2013_INTERRUPT
+	bool "Interrupt"
+	default y
+	help
+	  Enable interrupt support (requires GPIO).
+
+endif # INPUT_TSC2013

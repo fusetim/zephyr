@@ -145,6 +145,7 @@ set_variable_ifdef(CONFIG_ADC_MCUX_GAU          CONFIG_MCUX_COMPONENT_driver.cns
 set_variable_ifdef(CONFIG_DAC_MCUX_GAU          CONFIG_MCUX_COMPONENT_driver.cns_dac)
 set_variable_ifdef(CONFIG_DAI_NXP_ESAI          CONFIG_MCUX_COMPONENT_driver.esai)
 set_variable_ifdef(CONFIG_MCUX_LPCMP            CONFIG_MCUX_COMPONENT_driver.lpcmp)
+set_variable_ifdef(CONFIG_MCUX_SYSCTR_TIMER     CONFIG_MCUX_COMPONENT_driver.sysctr)
 if(CONFIG_NXP_RF_IMU)
     if(CONFIG_SOC_MCXW70AC)
         set(CONFIG_MCUX_COMPONENT_driver.mu1 ON)
@@ -174,6 +175,8 @@ set_variable_ifdef(CONFIG_OPAMP_MCUX_OPAMP          CONFIG_MCUX_COMPONENT_driver
 set_variable_ifdef(CONFIG_OPAMP_MCUX_OPAMP_FAST     CONFIG_MCUX_COMPONENT_driver.opamp_fast)
 set_variable_ifdef(CONFIG_CRC_DRIVER_NXP        CONFIG_MCUX_COMPONENT_driver.crc)
 set_variable_ifdef(CONFIG_CRC_DRIVER_NXP_LPC    CONFIG_MCUX_COMPONENT_driver.lpc_crc)
+set_variable_ifdef(CONFIG_CLOCK_MONITOR_NXP_CMU_FC CONFIG_MCUX_COMPONENT_driver.cmu_fc)
+set_variable_ifdef(CONFIG_CLOCK_MONITOR_NXP_CMU_FM CONFIG_MCUX_COMPONENT_driver.cmu_fm)
 set_variable_ifdef(CONFIG_PHY_NXP_T1S           CONFIG_MCUX_COMPONENT_driver.tenbaset_phy)
 set_variable_ifdef(CONFIG_AUXDISPLAY_NXP_SLCD CONFIG_MCUX_COMPONENT_driver.slcd)
 

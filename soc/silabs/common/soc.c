@@ -40,26 +40,11 @@ static void init_lfxo(void)
 	 * Configuring LFXO disables it, so we can do that only if it's not
 	 * used as a SYSCLK/HFCLK source.
 	 */
-#if defined(_SILICON_LABS_32B_SERIES_2)
-	if (CMU_ClockSelectGet(cmuClock_SYSCLK) != cmuSelect_LFXO) {
-		/*
-		 * Check if device has LFXO configuration info in DEVINFO
-		 * See AN0016.2
-		 */
-		if ((DEVINFO->MODULEINFO & DEVINFO_MODULEINFO_LFXOCALVAL) ==
-		    DEVINFO_MODULEINFO_LFXOCALVAL_VALID) {
-			lfxoInit.capTune =
-				(DEVINFO->MODXOCAL & _DEVINFO_MODXOCAL_LFXOCAPTUNE_MASK) >>
-				_DEVINFO_MODXOCAL_LFXOCAPTUNE_SHIFT;
-		}
-		CMU_LFXOInit(&lfxoInit);
-	}
-#else
 	if (CMU_ClockSelectGet(cmuClock_HF) != cmuSelect_LFXO) {
 		CMU_LFXOInit(&lfxoInit);
 		CMU_OscillatorEnable(cmuOsc_LFXO, true, true);
 	}
-#endif /* _SILICON_LABS_32B_SERIES_2 */
+
 	SystemLFXOClockSet(CONFIG_CMU_LFXO_FREQ);
 }
 
@@ -71,28 +56,6 @@ static void init_lfxo(void)
 static ALWAYS_INLINE void clock_init(void)
 {
 #ifdef CONFIG_CMU_HFCLK_HFXO
-#if defined(_SILICON_LABS_32B_SERIES_2)
-	if (CMU_ClockSelectGet(cmuClock_SYSCLK) != cmuSelect_HFXO) {
-		/*
-		 * Check if device has HFXO configuration info in DEVINFO
-		 * See AN0016.2
-		 */
-		if ((DEVINFO->MODULEINFO & DEVINFO_MODULEINFO_HFXOCALVAL) ==
-		    DEVINFO_MODULEINFO_HFXOCALVAL_VALID) {
-			hfxoInit.ctuneXoAna =
-				(DEVINFO->MODXOCAL & _DEVINFO_MODXOCAL_HFXOCTUNEXOANA_MASK) >>
-				_DEVINFO_MODXOCAL_HFXOCTUNEXOANA_SHIFT;
-			hfxoInit.ctuneXiAna =
-				(DEVINFO->MODXOCAL & _DEVINFO_MODXOCAL_HFXOCTUNEXIANA_MASK) >>
-				_DEVINFO_MODXOCAL_HFXOCTUNEXIANA_SHIFT;
-		}
-
-		CMU_HFXOInit(&hfxoInit);
-		CMU_ClockSelectSet(cmuClock_SYSCLK, cmuSelect_HFXO);
-	}
-
-	SystemHFXOClockSet(CONFIG_CMU_HFXO_FREQ);
-#else
 	if (CMU_ClockSelectGet(cmuClock_HF) != cmuSelect_HFXO) {
 		CMU_HFXOInit(&hfxoInit);
 		CMU_OscillatorEnable(cmuOsc_HFXO, true, true);
@@ -100,15 +63,10 @@ static ALWAYS_INLINE void clock_init(void)
 	}
 	SystemHFXOClockSet(CONFIG_CMU_HFXO_FREQ);
 	CMU_OscillatorEnable(cmuOsc_HFRCO, false, false);
-#endif /* _SILICON_LABS_32B_SERIES_2 */
 #elif (defined CONFIG_CMU_HFCLK_LFXO)
 	/* LFXO should've been already brought up by init_lfxo() */
-#if defined(_SILICON_LABS_32B_SERIES_2)
-	CMU_ClockSelectSet(cmuClock_SYSCLK, cmuSelect_LFXO);
-#else
 	CMU_ClockSelectSet(cmuClock_HF, cmuSelect_LFXO);
 	CMU_OscillatorEnable(cmuOsc_HFRCO, false, false);
-#endif /* _SILICON_LABS_32B_SERIES_2 */
 #elif (defined CONFIG_CMU_HFCLK_HFRCO)
 	/*
 	 * This is the default clock, the controller starts with
@@ -127,31 +85,27 @@ static ALWAYS_INLINE void clock_init(void)
 #error "Unsupported clock source for HFCLK selected"
 #endif
 
-#if defined(_SILICON_LABS_32B_SERIES_2)
-	/* Enable the High Frequency Peripheral Clock */
-	CMU_ClockEnable(cmuClock_PCLK, true);
-#else
 	/* Enable the High Frequency Peripheral Clock */
 	CMU_ClockEnable(cmuClock_HFPER, true);
-#endif /* _SILICON_LABS_32B_SERIES_2 */
 
 #if defined(CONFIG_GPIO_GECKO) || defined(CONFIG_LOG_BACKEND_SWO)
 	CMU_ClockEnable(cmuClock_GPIO, true);
 #endif
 }
 
-#ifdef CONFIG_SOC_GECKO_EMU_DCDC
+#ifdef CONFIG_SILABS_GECKO_EMU_DCDC
 static ALWAYS_INLINE void dcdc_init(void)
 {
-#if defined(CONFIG_SOC_GECKO_EMU_DCDC_MODE_UNCONFIGURED)
+#if defined(CONFIG_SILABS_GECKO_EMU_DCDC_MODE_UNCONFIGURED)
 	/* Nothing to do, leave DC/DC converter in unconfigured, safe state. */
-#elif defined(CONFIG_SOC_GECKO_EMU_DCDC_MODE_ON) || defined(CONFIG_SOC_GECKO_EMU_DCDC_MODE_BYPASS)
+#elif defined(CONFIG_SILABS_GECKO_EMU_DCDC_MODE_ON) ||                                             \
+	defined(CONFIG_SILABS_GECKO_EMU_DCDC_MODE_BYPASS)
 	EMU_DCDCInit_TypeDef init_cfg = EMU_DCDCINIT_DEFAULT;
-#if defined(CONFIG_SOC_GECKO_EMU_DCDC_MODE_BYPASS)
+#if defined(CONFIG_SILABS_GECKO_EMU_DCDC_MODE_BYPASS)
 	init_cfg.dcdcMode = emuDcdcMode_Bypass;
 #endif
 	EMU_DCDCInit(&init_cfg);
-#elif defined(CONFIG_SOC_GECKO_EMU_DCDC_MODE_OFF)
+#elif defined(CONFIG_SILABS_GECKO_EMU_DCDC_MODE_OFF)
 	EMU_DCDCPowerOff();
 #else
 #error "Unsupported power configuration mode of the on chip DC/DC converter."
@@ -164,9 +118,6 @@ static void swo_init(void)
 {
 	struct soc_gpio_pin pin_swo = PIN_SWO;
 
-#if defined(_SILICON_LABS_32B_SERIES_2)
-	GPIO->TRACEROUTEPEN = GPIO_TRACEROUTEPEN_SWVPEN;
-#else
 	/* Select HFCLK as the debug trace clock */
 	CMU->DBGCLKSEL = CMU_DBGCLKSEL_DBG_HFCLK;
 
@@ -178,7 +129,6 @@ static void swo_init(void)
 #else
 	GPIO->ROUTE = GPIO_ROUTE_SWOPEN | (SWO_LOCATION << 8);
 #endif
-#endif /* _SILICON_LABS_32B_SERIES_2 */
 
 	GPIO_PinModeSet(pin_swo.port, pin_swo.pin, pin_swo.mode, pin_swo.out);
 }
@@ -201,7 +151,7 @@ void soc_early_init_hook(void)
 	init_lfxo();
 #endif
 
-#ifdef CONFIG_SOC_GECKO_EMU_DCDC
+#ifdef CONFIG_SILABS_GECKO_EMU_DCDC
 	dcdc_init();
 #endif
 

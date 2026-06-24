@@ -111,6 +111,9 @@ Boards
   to set :kconfig:option:`CONFIG_TFM_MCUBOOT_SIGNATURE_TYPE` to ``"RSA-3072"``.
   Otherwise, make sure to have your own signing keys of the signature type in use.
 
+* All Kconfigs under modules/hal_silabs/gecko were renamed from ``SOC_GECKO_*``
+  to ``SILABS_GECKO_*``. Adapt your board accordingly.
+
 Device Drivers and Devicetree
 *****************************
 
@@ -140,6 +143,11 @@ ADC
 * The ``girqs`` and ``pcrs`` properties (array type) of :dtcompatible:`microchip,xec-adc` have been
   replaced by encoded ``girqs`` (using ``MCHP_XEC_ECIA_GIRQ_ENC`` macros) and ``pcr-scr`` (int type)
   for encoded PCR register index and bit position (:github:`105658`).
+
+* The :kconfig:option:`CONFIG_LPADC_DO_OFFSET_CALIBRATION` option is now only meaningful when
+  :kconfig:option:`CONFIG_ADC_MCUX_LPADC` is enabled, and its ``default y`` is now scoped to that
+  condition. In-tree boards no longer enable it explicitly in their defconfigs since
+  the default already covers them.
 
 Audio Codec
 ===========
@@ -205,6 +213,9 @@ Display
   format. Displays whose framebuffer instead expects a red, green, blue byte order must now report
   :c:enumerator:`PIXEL_FORMAT_BGR_888`, for which the LVGL glue performs the red/blue channel swap
   automatically.
+
+* The Kconfig options ``CONFIG_ST730X_POWERMODE_LOW`` for ST7305 and ST7306 displays has been
+  removed in favour of toggling the low-power-mode property on the device node.
 
 DMA
 ===
@@ -474,6 +485,14 @@ STM32
   boards which modified the ``interrupts`` property on either node must be updated
   to set the property on the top-level ``&radio`` node instead. (:github:`110546`)
 
+* Renamed ST gpio-nexus for camera and display connectors as follow:
+  ``st,dsi-lcd-qsh-030`` is renamed into :dtcompatible:`st,dsi-lcd-qsh-030-connector`
+  ``st,stm32-dcmi-camera-fpu-330zh`` is renamed into :dtcompatible:`st,dvp-cam-zif-30-connector`
+
+* :dtcompatible:`st,stm32-xspim` is now also used on STM32H5 and STM32H7RS series
+  to declare and configure XSPI Manager. Boards making use of XSPI must now enable
+  ``&xspim`` node in addition to the desired XSPI controller to use XSPI. (:github:`109903`)
+
 Syscon
 ======
 
@@ -494,6 +513,17 @@ USB
   :c:struct:`usbd_vreq_node` are now called with NULL ``buf`` before data stage is received.
   This allows the stack to return STALL during data stage. Out-of-tree class and vendor handlers
   need to be updated. (:github:`108840`)
+
+Video
+=====
+
+* The :dtcompatible:`ovti,ov7670` and :dtcompatible:`ovti,ov7675` camera drivers now assume a
+  24 MHz XCLK input instead of the previous 6 MHz, matching the typical XCLK frequency listed in
+  the OV7670 datasheet. Boards driving an OV7670 or OV7675 sensor must update their board-level
+  XCLK clock configuration accordingly. For example, ``frdm_mcxn236`` has been switched from
+  ``kFRO12M_to_CLKOUT`` (divided by 2 to yield 6 MHz) to ``kFRO_HF_to_CLKOUT`` (divided by 2 to
+  yield 24 MHz), and ``frdm_mcxn947`` keeps ``kMAIN_CLK_to_CLKOUT`` but changes the CLKOUT
+  divider from 25 to 6 to yield 24 MHz. (:github:`109393`)
 
 WiFi
 ====
@@ -669,6 +699,19 @@ Networking
 * ``net_if_config_get`` was removed as it was a duplicate of :c:func:`net_if_get_config`.
   (:github:`110930`)
 
+* The number of ZVFS eventfd's is now determined by a ``ZVFS_EVENTFD_SIZE`` define
+  instead of using the :kconfig:option:`CONFIG_ZVFS_EVENTFD_MAX` Kconfig option directly.
+  Subsystems can specify their own eventfd count requirements by specifying Kconfig
+  options with the prefix ``CONFIG_ZVFS_EVENTFD_ADD_SIZE_``. These are summed together
+  and the result is compared against :kconfig:option:`CONFIG_ZVFS_EVENTFD_MAX`; the larger
+  of the two values is used. To force :kconfig:option:`CONFIG_ZVFS_EVENTFD_MAX` to be used,
+  even when its value is less than the sum of the custom requirements, a new
+  :kconfig:option:`CONFIG_ZVFS_EVENTFD_IGNORE_MIN` option has been introduced (which
+  defaults to being disabled). As a result, networking subsystems that allocate eventfds
+  (e.g. HTTP server, CoAP server, LwM2M, PTP, SSH, the socket service and the WPA
+  supplicant) no longer require the application to manually bump
+  :kconfig:option:`CONFIG_ZVFS_EVENTFD_MAX` to account for them. (:github:`111201`)
+
 
 Ethernet
 ========
@@ -705,6 +748,21 @@ gPTP
 * Removed ``net_eth_get_ptp_port`` and ``net_eth_set_ptp_port``.
   New :c:func:`gptp_get_port_number` and :c:func:`gptp_set_port_number`
   can be used instead.
+
+Modem
+*****
+
+SIMCOM SIM7080
+==============
+
+* The Kconfig option :kconfig:option:`CONFIG_MODEM_SIMCOM_SIM7080_LTE_BANDS` has been split
+  into :kconfig:option:`CONFIG_MODEM_SIMCOM_SIM7080_LTE_BANDS_M1` and
+  :kconfig:option:`CONFIG_MODEM_SIMCOM_SIM7080_LTE_BANDS_NB1` since NB-IoT and CAT-M have
+  slightly different usable bands. The type of the newly introduced configuration values
+  is a hex bitmap of selected bands. By default bands 8, 20 and 28 are selected.
+
+  Applications configuring the :kconfig:option:`CONFIG_MODEM_SIMCOM_SIM7080_LTE_BANDS`
+  must update their configuration.
 
 LoRaWAN
 *******
@@ -823,3 +881,6 @@ Architectures
 
 * ``xtensa_soc_mpu_ranges[]`` and ``xtensa_soc_mpu_ranges_num`` are removed. If SoC or board
   needs its own memory regions at boot, override :c:var:`xtensa_mpu_ranges` instead.
+
+* ``CONFIG_XTENSA_MPU_DEFAULT_MEM_TYPE`` is removed since memory types are now defined via
+  ``xtensa_mpu_mem_type_ranges[]``.

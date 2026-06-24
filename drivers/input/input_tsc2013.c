@@ -25,7 +25,7 @@ LOG_MODULE_REGISTER(tsc2013, CONFIG_INPUT_LOG_LEVEL);
 #define TSC2013_REG_IY 			0x5 		// Iy measurement result		(R)
 #define TSC2013_REG_Z1 			0x6 		// Z1 measurement result		(R)
 #define TSC2013_REG_Z2 			0x7 		// Z2 measurement result		(R)
-#define TSC2013_REG_STATUS		0x8 		// STatus						(R)
+#define TSC2013_REG_STATUS		0x8 		// Status						(R)
 #define TSC2013_REG_AUX			0x9 		// AUX measurement result		(R)
 // Reserved range: 0xA - 0xB
 #define TSC2013_REG_CFR0		0xC			// Configuration Register 0 	(RW)
@@ -130,7 +130,7 @@ static int tsc2013_i2c_write_conversion(const struct device *dev, uint8_t conver
 static int tsc2013_process(const struct device *dev)
 {
 	int r;
-	uint8_t i2c_buf[4];
+	uint8_t i2c_buf[8];
 	uint32_t row;
 	uint32_t col;
 	bool pressed;
@@ -162,24 +162,53 @@ static int tsc2013_process(const struct device *dev)
 
 	// Otherwise, we must read Ix & Iy
 	// Iy follows Ix, therefore we can use a seq read cycle.
-	r = tsc2013_i2c_read_register(dev, TSC2013_REG_IX, i2c_buf, 4);
+	r = tsc2013_i2c_read_register(dev, TSC2013_REG_X1, i2c_buf, 8);
 	if (r < 0) {
 		return r;
 	}
-	col = (((uint32_t) i2c_buf[0]) << 8U) | ((uint32_t) i2c_buf[1]);
-	row = (((uint32_t) i2c_buf[2]) << 8U) | ((uint32_t) i2c_buf[3]);
-	if (pressed && col == pointer_col && row == pointer_row) {
+	uint32_t x1 = (((uint32_t) i2c_buf[0]) << 8U) | ((uint32_t) i2c_buf[1]);
+	uint32_t x2 = (((uint32_t) i2c_buf[2]) << 8U) | ((uint32_t) i2c_buf[3]);
+	uint32_t y1 = (((uint32_t) i2c_buf[4]) << 8U) | ((uint32_t) i2c_buf[5]);
+	uint32_t y2 = (((uint32_t) i2c_buf[6]) << 8U) | ((uint32_t) i2c_buf[7]);
+	if (x1 >= x2)
+	{
+		col = x2 + ((x1 - x2) >> 1);
+	}
+	else
+	{
+		col = x1 + ((x2 - x1) >> 1);
+	}
+
+	if (y1 >= y2)
+	{
+		row = y2 + ((y1 - y2) >> 1);
+	}
+	else
+	{
+		row = y1 + ((y2 - y1) >> 1);
+	}
+	col = 4096 - col;
+	row = 4096 - row;
+	// Range 3200-4000
+	col -= 3200;
+	row -= 3200;
+	// Map row to X (800->320)
+	// Map col to Y (800->240)
+	row = row * 32 / 80;
+	col = col * 24 / 80;
+	col = 240 - col;
+	if (pointer_present > 0 && col == pointer_col && row == pointer_row) {
 		// Same point, no need for a new event
 		return 0;
 	}
 	pointer_col = col;
 	pointer_row = row;
-	pointer_present = 10;
+	pointer_present = 1;
 
 	// Trigger touch events
-	input_touchscreen_report_pos(dev, pointer_col, pointer_row, K_FOREVER);
+	input_touchscreen_report_pos(dev, pointer_row, pointer_col, K_FOREVER);
 	input_report_key(dev, INPUT_BTN_TOUCH, 1, true, K_FOREVER);
-	LOG_INF("Touch row: %d, col: %d", row, col);
+	LOG_INF("Touch row: %d, col: %d", pointer_row, pointer_col);
 
 	// No need to clear any status register, the read was all it needs
 
@@ -318,12 +347,12 @@ static int tsc2013_init(const struct device *dev)
 	//		return r;
 	//	}
 	//}
-	r = tsc2013_i2c_write_conversion(dev, TSC2013_CFN_IX_IY_TOUCH_SCANS, false, false);
+	r = tsc2013_i2c_write_conversion(dev, TSC2013_CFN_TRIPLET_TOUCH_SCANS, false, false);
 	if (r < 0) {
 		LOG_ERR("Could not write / select the conversion for IX/IY Touch scans.");
 		return r;
 	}
-	i2c_buf[1] = 0b10100001; // TSC control, 12bit res, 100 µs voltage stabilization
+	i2c_buf[1] = 0b10000001; // TSC control, 10bit res, 100 µs voltage stabilization
 	i2c_buf[2] = 0b00000000;
 	r = tsc2013_i2c_write_register(dev, TSC2013_REG_CFR0, i2c_buf, 3);
 	if (r < 0) {
@@ -331,6 +360,13 @@ static int tsc2013_init(const struct device *dev)
 		return r;
 	}
 
+	// Read back all registers for debug
+	uint8_t reg_buf[32] = {0};
+	r = tsc2013_i2c_read_register(dev, TSC2013_REG_X1, reg_buf, 32);
+	for (uint8_t i = 0; i < 16; i++) {
+		uint16_t value = (((uint16_t) reg_buf[2*i]) << 8U) | ((uint16_t) reg_buf[2*i+1]);
+		LOG_INF("reg %d: %p", i, value);
+	}
 
 #ifdef CONFIG_INPUT_TSC2013_INTERRUPT
 	r = gpio_add_callback(config->int_gpio.port, &data->int_gpio_cb);

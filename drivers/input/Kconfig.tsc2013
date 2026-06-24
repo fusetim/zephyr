@@ -21,7 +21,7 @@ config INPUT_TSC2013_PERIOD_MS
 
 config INPUT_TSC2013_INTERRUPT
 	bool "Interrupt"
-	default y
+	default n
 	help
 	  Enable interrupt support (requires GPIO).
 

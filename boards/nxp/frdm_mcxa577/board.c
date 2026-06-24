@@ -324,6 +324,19 @@ void board_early_init_hook(void)
 #endif
 #endif
 
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(flexcan0))
+	/* FRO_HF (192 MHz) / 3 = 64 MHz: allows exact 75% SP at 8 Mbps (8 TQ) */
+	CLOCK_SetClockDiv(kCLOCK_DivFLEXCAN0, 3U);
+	CLOCK_AttachClk(kFRO_HF_to_FLEXCAN0);
+#endif
+
+#if DT_NODE_HAS_STATUS_OKAY(DT_NODELABEL(dac0))
+	SPC_EnableActiveModeAnalogModules(SPC0, kSPC_controlDac0);
+	CLOCK_AttachClk(kFRO_LF_DIV_to_DAC0);
+	CLOCK_SetClockDiv(kCLOCK_DivDAC0, 1u);
+	CLOCK_EnableClock(kCLOCK_GateDAC0);
+#endif
+
 	/* Set SystemCoreClock variable. */
 	SystemCoreClock = CLOCK_INIT_CORE_CLOCK;
 }

@@ -20,6 +20,7 @@ config SOC_FAMILY_MAX32_M33
 	select CPU_HAS_ARM_SAU
 	select ARMV8_M_DSP
 	select HAS_PM
+	select PM_STATE_SET_IRQ_UNLOCKED
 
 config SOC_FAMILY_MAX32_M4
 	select ARM
@@ -28,6 +29,7 @@ config SOC_FAMILY_MAX32_M4
 	select CPU_HAS_ARM_MPU
 	select CPU_HAS_FPU
 	select HAS_PM
+	select PM_STATE_SET_IRQ_UNLOCKED
 	select CLOCK_CONTROL
 
 config SOC_FAMILY_MAX32_RV32
@@ -43,22 +45,17 @@ config SOC_FAMILY_MAX32_RV32
 	select CLOCK_CONTROL
 	imply XIP
 
-config SOC_MAX32655_M4
-	select MAX32_HAS_SECONDARY_RV32
-
-config SOC_MAX32680_M4
-	select MAX32_HAS_SECONDARY_RV32
-
-config SOC_MAX32690_M4
-	select MAX32_HAS_SECONDARY_RV32
-
-config SOC_MAX78000_M4
-	select MAX32_HAS_SECONDARY_RV32
-
-config SOC_MAX78002_M4
-	select MAX32_HAS_SECONDARY_RV32
-
 if SOC_FAMILY_MAX32
+
+config SOC_FAMILY_MAX32_HALT_AFTER_BOOTLOADER_SUPPORT
+	bool "Halt after bootloader integration for JLink"
+	default y if !TRUSTED_EXECUTION_NONSECURE
+	select SOC_EARLY_RESET_HOOK
+	depends on SOC_FAMILY_MAX32_M4 || SOC_FAMILY_MAX32_M33
+	help
+	  To support properly halting after a reset when using JLink to flash
+	  the MAX32 SoC, inject the small dummy read into our early reset
+	  code to trigger the set hardware breakpoint
 
 config MAX32_ON_ENTER_CPU_IDLE_HOOK
 	bool "CPU idle hook enable"
@@ -71,13 +68,9 @@ config MAX32_ON_ENTER_CPU_IDLE_HOOK
 	  If needed, this hook can be used to prevent the CPU from actually
 	  entering sleep by skipping the WFE/WFI instruction.
 
-config MAX32_HAS_SECONDARY_RV32
-	bool
-
-if MAX32_HAS_SECONDARY_RV32
-
 config MAX32_SECONDARY_RV32
 	bool "Secondary RISC-V core enable"
+	depends on DT_HAS_ADI_MAX32_RV32_ENABLED
 
 config MAX32_STANDBY_DELAY
 	int "Prevent standby on boot for given ms"
@@ -95,7 +88,17 @@ config MAX32_SECONDARY_RV32_STARTUP_DELAY
 
 endif # MAX32_SECONDARY_RV32
 
-endif # MAX32_HAS_SECONDARY_RV32
+config MAX32_SECONDARY_M4
+	bool "Secondary M4 core enable"
+	depends on DT_HAS_ADI_MAX32_M4F_CPU1_ENABLED
+
+if MAX32_SECONDARY_M4
+
+config MAX32_SECONDARY_M4_STARTUP_DELAY
+	int "Secondary M4 core startup delay (in cycles)"
+	default 0
+
+endif # MAX32_SECONDARY_M4
 
 config BUILD_WITH_TFM
 	default y if TRUSTED_EXECUTION_NONSECURE

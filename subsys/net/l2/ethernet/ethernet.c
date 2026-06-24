@@ -251,7 +251,7 @@ static void ethernet_mcast_monitor_cb(struct net_if *iface, const struct net_add
 		return;
 	}
 
-	api->set_config(dev, ETHERNET_CONFIG_TYPE_FILTER, &cfg);
+	api->set_config(dev, iface, ETHERNET_CONFIG_TYPE_FILTER, &cfg);
 }
 #endif
 
@@ -296,6 +296,8 @@ static enum net_verdict ethernet_recv(struct net_if *iface,
 		if (verdict == NET_OK) {
 			iface = net_eth_get_bridge(ctx);
 		}
+
+		/* For NET_CONTINUE case, current iface continues to handle the pkt. */
 	}
 
 	type = net_ntohs(hdr->type);
@@ -491,6 +493,7 @@ static int ethernet_ll_prepare_on_ipv4(struct net_if *iface,
 				       struct net_pkt **out)
 {
 	struct ethernet_context *ctx = net_if_l2_data(iface);
+	__maybe_unused const struct net_in_addr *request_ip = net_pkt_ipv4_ll_resolve_addr(pkt);
 
 	if (IS_ENABLED(CONFIG_NET_VLAN) &&
 	    net_pkt_vlan_tag(pkt) != NET_VLAN_TAG_UNSPEC &&
@@ -500,13 +503,20 @@ static int ethernet_ll_prepare_on_ipv4(struct net_if *iface,
 		net_pkt_set_iface(pkt, iface);
 	}
 
+	if (net_pkt_lladdr_dst(pkt)->len > 0U) {
+		return NET_ARP_COMPLETE;
+	}
+
 	if (ethernet_ipv4_dst_is_broadcast_or_mcast(pkt)) {
 		return NET_ARP_COMPLETE;
 	}
 
 	if (IS_ENABLED(CONFIG_NET_ARP)) {
 		return net_arp_prepare(pkt,
-				       (struct net_in_addr *)NET_IPV4_HDR(pkt)->dst, NULL, out);
+				       request_ip != NULL ?
+				       (struct net_in_addr *)request_ip :
+				       (struct net_in_addr *)NET_IPV4_HDR(pkt)->dst,
+				       NULL, out);
 	}
 
 	return NET_ARP_COMPLETE;
@@ -673,10 +683,10 @@ static void ethernet_update_tx_stats(struct net_if *iface, struct net_pkt *pkt)
 	eth_stats_update_bytes_tx(iface, net_pkt_get_len(pkt));
 	eth_stats_update_pkts_tx(iface);
 
-	if (net_eth_is_addr_multicast(&hdr->dst)) {
-		eth_stats_update_multicast_tx(iface);
-	} else if (net_eth_is_addr_broadcast(&hdr->dst)) {
+	if (net_eth_is_addr_broadcast(&hdr->dst)) {
 		eth_stats_update_broadcast_tx(iface);
+	} else if (net_eth_is_addr_multicast(&hdr->dst)) {
+		eth_stats_update_multicast_tx(iface);
 	}
 }
 
@@ -688,15 +698,8 @@ static int ethernet_send(struct net_if *iface, struct net_pkt *pkt)
 	struct net_pkt *orig_pkt = pkt;
 	int ret;
 
-	if (!api) {
-		ret = -ENOENT;
-		goto error;
-	}
-
-	if (!api->send) {
-		ret = -ENOTSUP;
-		goto error;
-	}
+	NET_ASSERT(api != NULL);
+	NET_ASSERT(api->send != NULL);
 
 	/* We are trying to send a packet that is from bridge interface,
 	 * so all the bits and pieces should be there (like Ethernet header etc)
@@ -813,21 +816,30 @@ static inline int ethernet_enable(struct net_if *iface, bool state)
 {
 	const struct device *dev = net_if_get_device(iface);
 	const struct ethernet_api *eth = dev->api;
+	struct net_linkaddr *mac_addr;
 
-	if (!eth) {
-		return -ENOENT;
-	}
+	NET_ASSERT(eth != NULL);
 
 	if (!state) {
 		net_arp_clear_cache(iface);
 
 		if (eth->stop) {
-			return eth->stop(dev);
+			return eth->stop(dev, iface);
 		}
-	} else {
-		if (eth->start) {
-			return eth->start(dev);
-		}
+
+		return 0;
+	}
+
+	mac_addr = net_if_get_link_addr(iface);
+
+	if ((mac_addr->len != NET_ETH_ADDR_LEN) ||
+	    !net_eth_is_addr_valid((struct net_eth_addr *)mac_addr->addr)) {
+		NET_ERR("Invalid MAC address for iface %d (%p)", net_if_get_by_iface(iface), iface);
+		return -EINVAL;
+	}
+
+	if (eth->start) {
+		return eth->start(dev, iface);
 	}
 
 	return 0;
@@ -869,9 +881,7 @@ static void carrier_on_off(struct k_work *work)
 						    carrier_work);
 	bool eth_carrier_up;
 
-	if (ctx->iface == NULL) {
-		return;
-	}
+	NET_ASSERT(ctx->iface != NULL);
 
 	eth_carrier_up = atomic_test_bit(&ctx->flags, ETH_CARRIER_UP);
 
@@ -893,20 +903,11 @@ static void carrier_on_off(struct k_work *work)
 	}
 }
 
-void net_eth_carrier_on(struct net_if *iface)
+void net_eth_carrier_set(struct net_if *iface, bool carrier_up)
 {
 	struct ethernet_context *ctx = net_if_l2_data(iface);
 
-	if (!atomic_test_and_set_bit(&ctx->flags, ETH_CARRIER_UP)) {
-		k_work_submit(&ctx->carrier_work);
-	}
-}
-
-void net_eth_carrier_off(struct net_if *iface)
-{
-	struct ethernet_context *ctx = net_if_l2_data(iface);
-
-	if (atomic_test_and_clear_bit(&ctx->flags, ETH_CARRIER_UP)) {
+	if (atomic_test_and_set_bit_to(&ctx->flags, ETH_CARRIER_UP, carrier_up)) {
 		k_work_submit(&ctx->carrier_work);
 	}
 }
@@ -916,9 +917,7 @@ const struct device *net_eth_get_phy(struct net_if *iface)
 	const struct device *dev = net_if_get_device(iface);
 	const struct ethernet_api *api = dev->api;
 
-	if (!api) {
-		return NULL;
-	}
+	NET_ASSERT(api != NULL);
 
 	if (net_if_l2(iface) != &NET_L2_GET_NAME(ETHERNET)) {
 		return NULL;
@@ -928,7 +927,7 @@ const struct device *net_eth_get_phy(struct net_if *iface)
 		return NULL;
 	}
 
-	return api->get_phy(dev);
+	return api->get_phy(dev, iface);
 }
 
 #if defined(CONFIG_PTP_CLOCK)
@@ -937,9 +936,7 @@ const struct device *net_eth_get_ptp_clock(struct net_if *iface)
 	const struct device *dev = net_if_get_device(iface);
 	const struct ethernet_api *api = dev->api;
 
-	if (!api) {
-		return NULL;
-	}
+	NET_ASSERT(api != NULL);
 
 	if (net_if_l2(iface) != &NET_L2_GET_NAME(ETHERNET)) {
 		return NULL;
@@ -953,7 +950,7 @@ const struct device *net_eth_get_ptp_clock(struct net_if *iface)
 		return NULL;
 	}
 
-	return api->get_ptp_clock(dev);
+	return api->get_ptp_clock(dev, iface);
 }
 #endif /* CONFIG_PTP_CLOCK */
 
@@ -986,30 +983,10 @@ const struct device *z_impl_net_eth_get_ptp_clock_by_index(int index)
 }
 #endif /* CONFIG_PTP_CLOCK */
 
-#if defined(CONFIG_NET_L2_PTP)
-int net_eth_get_ptp_port(struct net_if *iface)
-{
-	struct ethernet_context *ctx = net_if_l2_data(iface);
-
-	return ctx->port;
-}
-
-void net_eth_set_ptp_port(struct net_if *iface, int port)
-{
-	struct ethernet_context *ctx = net_if_l2_data(iface);
-
-	ctx->port = port;
-}
-#endif /* CONFIG_NET_L2_PTP */
-
 #if defined(CONFIG_NET_PROMISCUOUS_MODE)
 int net_eth_promisc_mode(struct net_if *iface, bool enable)
 {
 	struct ethernet_req_params params;
-
-	if (!(net_eth_get_hw_capabilities(iface) & ETHERNET_PROMISC_MODE)) {
-		return -ENOTSUP;
-	}
 
 	params.promisc_mode = enable;
 
@@ -1022,10 +999,6 @@ int net_eth_txinjection_mode(struct net_if *iface, bool enable)
 {
 #ifdef CONFIG_NET_L2_ETHERNET_MGMT
 	struct ethernet_req_params params;
-
-	if (!(net_eth_get_hw_capabilities(iface) & ETHERNET_TXINJECTION_MODE)) {
-		return -ENOTSUP;
-	}
 
 	params.txinjection_mode = enable;
 
@@ -1044,10 +1017,6 @@ int net_eth_mac_filter(struct net_if *iface, struct net_eth_addr *mac,
 {
 #ifdef CONFIG_NET_L2_ETHERNET_MGMT
 	struct ethernet_req_params params;
-
-	if (!(net_eth_get_hw_capabilities(iface) & ETHERNET_HW_FILTERING)) {
-		return -ENOTSUP;
-	}
 
 	memcpy(&params.filter.mac_address, mac, sizeof(struct net_eth_addr));
 	params.filter.type = type;
@@ -1095,8 +1064,6 @@ void ethernet_init(struct net_if *iface)
 		net_if_mcast_mon_register(&mcast_monitor, NULL, ethernet_mcast_monitor_cb);
 	}
 #endif
-
-	net_arp_init();
 
 	ctx->is_init = true;
 }

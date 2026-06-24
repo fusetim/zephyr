@@ -23,17 +23,8 @@ LOG_MODULE_REGISTER(flash_img, CONFIG_IMG_MANAGER_LOG_LEVEL);
 #include <bootutil/bootutil_public.h>
 #endif
 
-#if defined(CONFIG_FLASH_USES_MAPPED_PARTITION)
 #define PARTITION_IS_RUNNING_APP_PARTITION(label) \
 	DT_SAME_NODE(DT_CHOSEN(zephyr_code_partition), DT_NODELABEL(label))
-#else
-#define PARTITION_IS_RUNNING_APP_PARTITION(label)                                            \
-	DT_SAME_NODE(PARTITION_NODE_MTD(DT_CHOSEN(zephyr_code_partition)),                   \
-		PARTITION_MTD(label)) && (PARTITION_ADDRESS(label) <=                  \
-				(CONFIG_FLASH_BASE_ADDRESS + CONFIG_FLASH_LOAD_OFFSET) &&          \
-			PARTITION_ADDRESS(label) + PARTITION_SIZE(label) >             \
-				(CONFIG_FLASH_BASE_ADDRESS + CONFIG_FLASH_LOAD_OFFSET))
-#endif
 
 #if defined(CONFIG_TRUSTED_EXECUTION_NONSECURE) && (CONFIG_TFM_MCUBOOT_IMAGE_NUMBER == 2)
 #define UPLOAD_FLASH_AREA_LABEL slot1_ns_partition
@@ -134,7 +125,7 @@ int flash_img_buffered_write(struct flash_img_context *ctx, const uint8_t *data,
 
 
 	/* if CONFIG_IMG_ERASE_PROGRESSIVELY is enabled the enabled CONFIG_STREAM_FLASH_ERASE
-	 * ensures that stream_flash erases flash progresively.
+	 * ensures that stream_flash erases flash progressively.
 	 */
 	rc = stream_flash_buffered_write(&ctx->stream, data, len, flush);
 	if (!flush) {
@@ -157,29 +148,28 @@ size_t flash_img_bytes_written(struct flash_img_context *ctx)
  * Determines if the specified area of flash is completely unwritten.
  *
  * @param	fa	pointer to flash area to scan
+ * @param	len	length of area (starting from beginning) of flash area to scan (must be
+ *			divisible by 4)
  *
  * @return	0	when not empty, 1 when empty, negative errno code on error.
  */
-static int flash_check_erased(const struct flash_area *fa)
+static int flash_check_erased(const struct flash_area *fa, off_t len)
 {
 	uint32_t data[FLASH_CHECK_ERASED_BUFFER_SIZE];
-	off_t addr;
-	off_t end;
 	int bytes_to_read;
 	int rc;
 	int i;
 	uint8_t erased_val;
 	uint32_t erased_val_32;
 
-	assert(fa->fa_size % sizeof(erased_val_32) == 0);
+	assert(len % sizeof(erased_val_32) == 0);
 
 	erased_val = flash_area_erased_val(fa);
 	erased_val_32 = ERASED_VAL_32(erased_val);
 
-	end = fa->fa_size;
-	for (addr = 0; addr < end; addr += sizeof(data)) {
-		if (end - addr < sizeof(data)) {
-			bytes_to_read = end - addr;
+	for (off_t addr = 0; addr < len; addr += sizeof(data)) {
+		if (len - addr < sizeof(data)) {
+			bytes_to_read = len - addr;
 		} else {
 			bytes_to_read = sizeof(data);
 		}
@@ -207,7 +197,9 @@ int flash_img_init_id(struct flash_img_context *ctx, uint8_t area_id)
 	int rc;
 	const struct device *flash_dev;
 #if defined(CONFIG_MCUBOOT_BOOTLOADER_MODE_SWAP_USING_OFFSET)
+#if CONFIG_IMG_CUSTOM_SECTOR_SIZE == 0
 	uint32_t sector_count = SWAP_USING_OFFSET_SECTOR_UPDATE_BEGIN;
+#endif
 	struct flash_sector sector_data;
 #endif
 
@@ -223,6 +215,7 @@ int flash_img_init_id(struct flash_img_context *ctx, uint8_t area_id)
 	/* Query size of first sector in flash for upgrade slot, so it can be erased, and begin
 	 * upload started at the second sector
 	 */
+#if CONFIG_IMG_CUSTOM_SECTOR_SIZE == 0
 	rc = flash_area_sectors((const struct flash_area *)ctx->flash_area, &sector_count,
 				&sector_data);
 
@@ -235,8 +228,12 @@ int flash_img_init_id(struct flash_img_context *ctx, uint8_t area_id)
 		ctx->flash_area = NULL;
 		return -ENOENT;
 	}
+#else
+	sector_data.fs_size = CONFIG_IMG_CUSTOM_SECTOR_SIZE;
+#endif
 
-	if (!flash_check_erased((const struct flash_area *)ctx->flash_area)) {
+	if (!flash_check_erased((const struct flash_area *)ctx->flash_area,
+				(off_t)sector_data.fs_size)) {
 		/* Flash is not empty, therefore flatten/erase the area to prevent issues when
 		 * the firmware update process begins
 		 */

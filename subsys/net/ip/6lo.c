@@ -108,8 +108,18 @@ static int get_ihpc_inlined_size(uint16_t iphc)
 	size += sa_inline_size_table[(iphc & NET_6LO_IPHC_SA_MASK) >>
 				      NET_6LO_IPHC_SAM_POS];
 
-	size += da_inline_size_table[(iphc & NET_6LO_IPHC_DA_MASK) >>
-				      NET_6LO_IPHC_DAM_POS];
+	/* The destination index combines M | DAC | DAM and can be up to 4 bits
+	 * (0-15), but da_inline_size_table only covers the valid combinations.
+	 * Reject reserved/invalid modes rather than reading past the table.
+	 */
+	uint8_t da_idx = (iphc & NET_6LO_IPHC_DA_MASK) >> NET_6LO_IPHC_DAM_POS;
+
+	if (da_idx >= ARRAY_SIZE(da_inline_size_table)) {
+		NET_DBG("Invalid destination addressing mode");
+		return -1;
+	}
+
+	size += da_inline_size_table[da_idx];
 
 	NET_DBG("Size of inlined IP HDR data: %d", size);
 
@@ -1506,7 +1516,16 @@ static bool uncompress_IPHC_header(struct net_pkt *pkt)
 		udp->len = net_htons(len);
 
 		if (nhc & NET_6LO_NHC_UDP_CHECKSUM) {
-			udp->chksum = net_calc_chksum_udp(pkt);
+			int ret;
+			uint16_t chksum = 0;
+
+			udp->chksum = 0;
+			ret = net_calc_chksum_udp(pkt, &chksum);
+			if (ret < 0) {
+				goto fail;
+			}
+
+			udp->chksum = chksum;
 		}
 	}
 

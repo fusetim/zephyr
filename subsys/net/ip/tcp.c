@@ -74,8 +74,8 @@ static sys_slist_t tcp_conns = SYS_SLIST_STATIC_INIT(&tcp_conns);
 
 static K_MUTEX_DEFINE(tcp_lock);
 
-K_MEM_SLAB_DEFINE_STATIC(tcp_conns_slab, sizeof(struct tcp),
-				CONFIG_NET_MAX_CONTEXTS, 4);
+K_MEM_SLAB_DEFINE_STATIC_TYPE(tcp_conns_slab, struct tcp,
+			      CONFIG_NET_MAX_CONTEXTS);
 
 static struct k_work_q tcp_work_q;
 static K_KERNEL_STACK_DEFINE(work_q_stack, CONFIG_NET_TCP_WORKQ_STACK_SIZE);
@@ -891,8 +891,7 @@ static void tcp_conn_release(struct k_work *work)
 
 	if (CONFIG_NET_TCP_RECV_QUEUE_TIMEOUT) {
 		if (conn->queue_recv_data != NULL) {
-			net_buf_unref(conn->queue_recv_data);
-			conn->queue_recv_data = NULL;
+			net_buf_drop(&conn->queue_recv_data);
 		}
 	}
 
@@ -906,10 +905,9 @@ static void tcp_conn_release(struct k_work *work)
 
 	k_mutex_unlock(&conn->lock);
 
+	k_mutex_lock(&tcp_lock, K_FOREVER);
 	net_context_unref(conn->context);
 	conn->context = NULL;
-
-	k_mutex_lock(&tcp_lock, K_FOREVER);
 	sys_slist_find_and_remove(&tcp_conns, &conn->next);
 	k_mutex_unlock(&tcp_lock);
 
@@ -1085,8 +1083,11 @@ static uint8_t *tcp_options_get(struct net_pkt *pkt, int tcp_options_len,
 
 	net_pkt_cursor_backup(pkt, &backup);
 	net_pkt_cursor_init(pkt);
-	net_pkt_skip(pkt, net_pkt_ip_hdr_len(pkt) + net_pkt_ip_opts_len(pkt) +
-		     sizeof(struct tcphdr));
+	if (net_pkt_skip(pkt, net_pkt_ip_hdr_len(pkt) + net_pkt_ip_opts_len(pkt) +
+				      sizeof(struct tcphdr)) < 0) {
+		net_pkt_cursor_restore(pkt, &backup);
+		return NULL;
+	}
 	ret = net_pkt_read(pkt, buf, MIN(tcp_options_len, buf_len));
 	if (ret < 0) {
 		buf = NULL;
@@ -1278,8 +1279,7 @@ static size_t tcp_check_pending_data(struct tcp *conn, struct net_pkt *pkt,
 		} else {
 			/* Check if the queued data is just a section of the incoming data */
 			if (gap_size <= 0) {
-				net_buf_unref(conn->queue_recv_data);
-				conn->queue_recv_data = NULL;
+				net_buf_drop(&conn->queue_recv_data);
 
 				k_work_cancel_delayable(&conn->recv_queue_timer);
 			}
@@ -1309,7 +1309,9 @@ static enum net_verdict tcp_data_get(struct tcp *conn, struct net_pkt *pkt, size
 		net_pkt_cursor_init(pkt);
 		net_pkt_set_overwrite(pkt, true);
 
-		net_pkt_skip(pkt, net_pkt_get_len(pkt) - *len);
+		if (net_pkt_skip(pkt, net_pkt_get_len(pkt) - *len) < 0) {
+			return NET_DROP;
+		}
 
 		tcp_update_recv_wnd(conn, -*len);
 		if (*len > conn->recv_win_sent) {
@@ -1712,8 +1714,13 @@ static int tcp_pkt_peek(struct net_pkt *to, struct net_pkt *from, size_t pos,
 	net_pkt_cursor_init(from);
 
 	if (pos) {
+		int ret;
 		net_pkt_set_overwrite(from, true);
-		net_pkt_skip(from, pos);
+
+		ret = net_pkt_skip(from, pos);
+		if (ret < 0) {
+			return ret;
+		}
 	}
 
 	return net_pkt_copy(to, from, len);
@@ -1928,8 +1935,7 @@ static void tcp_cleanup_recv_queue(struct k_work *work)
 		net_buf_frags_len(conn->queue_recv_data),
 		tcp_get_seq(conn->queue_recv_data));
 
-	net_buf_unref(conn->queue_recv_data);
-	conn->queue_recv_data = NULL;
+	net_buf_drop(&conn->queue_recv_data);
 
 	k_mutex_unlock(&conn->lock);
 }
@@ -2008,7 +2014,7 @@ static void tcp_resend_data(struct k_work *work)
  out:
 	k_mutex_unlock(&conn->lock);
 
-	if (conn_unref) {
+	if (conn_unref && conn->state != TCP_UNUSED && conn->state != TCP_CLOSED) {
 		tcp_conn_close(conn, -ETIMEDOUT);
 	}
 }
@@ -2306,12 +2312,16 @@ static enum net_verdict tcp_recv(struct net_conn *net_conn,
 	ARG_UNUSED(net_conn);
 	ARG_UNUSED(proto);
 
+	th = th_get(pkt);
+	if (th == NULL || th_off(th) < 5) {
+		goto out;
+	}
+
 	conn = tcp_conn_search(pkt);
 	if (conn) {
 		goto in;
 	}
 
-	th = th_get(pkt);
 
 	if (th_flags(th) & SYN && !(th_flags(th) & ACK)) {
 		struct tcp *conn_old = ((struct net_context *)user_data)->tcp;
@@ -2783,8 +2793,7 @@ static void tcp_queue_recv_data(struct tcp *conn, struct net_pkt *pkt,
 				NET_ERR("Incorrect order in out of order sequence for conn %p",
 					conn);
 				/* error in sequence list, drop it */
-				net_buf_unref(conn->queue_recv_data);
-				conn->queue_recv_data = NULL;
+				net_buf_drop(&conn->queue_recv_data);
 			}
 		} else {
 			NET_DBG("[%p] Cannot add new data to queue", conn);
@@ -2948,13 +2957,6 @@ static enum net_verdict tcp_in(struct tcp *conn, struct net_pkt *pkt)
 
 	NET_DBG("[%p] %s", conn, tcp_conn_state(conn, pkt));
 
-	if (th_off(th) < 5) {
-		net_tcp_reply_rst(pkt);
-		do_close = true;
-		close_status = -ECONNRESET;
-		goto out;
-	}
-
 	len = tcp_data_len(pkt);
 
 	/* first validate the seqnum */
@@ -3037,7 +3039,7 @@ static enum net_verdict tcp_in(struct tcp *conn, struct net_pkt *pkt)
 			return NET_DROP;
 		}
 
-		/* Accroding to RFC 793, the ACKnum is acceptable if in scope
+		/* According to RFC 793, the ACKnum is acceptable if in scope
 		 * SND.UNA =< SEG.ACK =< SND.NXT
 		 * Otherwise, drop the packet and send an ACK back.
 		 */
@@ -3747,9 +3749,10 @@ int net_tcp_put(struct net_context *context, bool force_close)
 
 			keep_alive_timer_stop(conn);
 		}
-	} else if (conn->in_connect) {
+	} else if (conn->in_connect && conn->state != TCP_CLOSED && conn->state != TCP_UNUSED) {
 		conn->in_connect = false;
 		k_sem_reset(&conn->connect_sem);
+		tcp_conn_close(conn, -ECONNABORTED);
 	}
 
 	k_mutex_unlock(&conn->lock);
@@ -4219,7 +4222,15 @@ int net_tcp_finalize(struct net_pkt *pkt, bool force_chksum)
 	tcp_hdr->chksum = 0U;
 
 	if (net_if_need_calc_tx_checksum(net_pkt_iface(pkt), type) || force_chksum) {
-		tcp_hdr->chksum = net_calc_chksum_tcp(pkt);
+		int ret;
+		uint16_t chksum = 0;
+
+		ret = net_calc_chksum_tcp(pkt, &chksum);
+		if (ret < 0) {
+			return ret;
+		}
+
+		tcp_hdr->chksum = chksum;
 		net_pkt_set_chksum_done(pkt, true);
 	}
 
@@ -4235,10 +4246,15 @@ struct net_tcp_hdr *net_tcp_input(struct net_pkt *pkt,
 
 	if (IS_ENABLED(CONFIG_NET_TCP_CHECKSUM) &&
 	    (net_if_need_calc_rx_checksum(net_pkt_iface(pkt), type) ||
-	     net_pkt_is_ip_reassembled(pkt)) &&
-	    net_calc_chksum_tcp(pkt) != 0U) {
-		NET_DBG("DROP: checksum mismatch");
-		goto drop;
+	     net_pkt_is_ip_reassembled(pkt))) {
+		uint16_t chksum = 0;
+		int ret;
+
+		ret = net_calc_chksum_tcp(pkt, &chksum);
+		if (ret < 0 || chksum != 0U) {
+			NET_DBG("DROP: checksum mismatch");
+			goto drop;
+		}
 	}
 
 	tcp_hdr = (struct net_tcp_hdr *)net_pkt_get_data(pkt, tcp_access);
@@ -4261,7 +4277,7 @@ static enum net_verdict tcp_input(struct net_conn *net_conn,
 	struct tcphdr *th = th_get(pkt);
 	enum net_verdict verdict = NET_DROP;
 
-	if (th) {
+	if (th && (th_off(th) >= 5)) {
 		struct tcp *conn = tcp_conn_search(pkt);
 
 		if (conn == NULL && SYN == th_flags(th)) {
@@ -4352,11 +4368,15 @@ enum net_verdict tp_input(struct net_conn *net_conn,
 	bool responded = false;
 	static char buf[512];
 	enum net_verdict verdict = NET_DROP;
+	size_t data_len;
 
 	net_pkt_cursor_init(pkt);
 	net_pkt_set_overwrite(pkt, true);
-	net_pkt_skip(pkt, net_pkt_ip_hdr_len(pkt) +
-		     net_pkt_ip_opts_len(pkt) + sizeof(*uh));
+
+	data_len = net_pkt_ip_hdr_len(pkt) + net_pkt_ip_opts_len(pkt) + sizeof(*uh);
+	if (net_pkt_skip(pkt, data_len) < 0) {
+		return NET_DROP;
+	}
 	net_pkt_read(pkt, buf, data_len);
 	buf[data_len] = '\0';
 	data_len += 1;
@@ -4367,8 +4387,10 @@ enum net_verdict tp_input(struct net_conn *net_conn,
 
 	net_pkt_cursor_init(pkt);
 	net_pkt_set_overwrite(pkt, true);
-	net_pkt_skip(pkt, net_pkt_ip_hdr_len(pkt) +
-		     net_pkt_ip_opts_len(pkt) + sizeof(*uh));
+	data_len = net_pkt_ip_hdr_len(pkt) + net_pkt_ip_opts_len(pkt) + sizeof(*uh);
+	if (net_pkt_skip(pkt, data_len) < 0) {
+		return NET_DROP;
+	}
 	net_pkt_read(pkt, buf, data_len);
 	buf[data_len] = '\0';
 	data_len += 1;
@@ -4514,10 +4536,19 @@ void net_tcp_foreach(net_tcp_cb_t cb, void *user_data)
 	k_mutex_lock(&tcp_lock, K_FOREVER);
 
 	SYS_SLIST_FOR_EACH_CONTAINER_SAFE(&tcp_conns, conn, tmp, next) {
+		/* Keep tcp_lock held while invoking the callback.
+		 * tcp_conn_release() removes entries from this list and
+		 * frees both conn->context and the conn slab under
+		 * tcp_lock, so dropping the lock here would allow a
+		 * concurrent release to free the *next* node saved by
+		 * the _SAFE iterator, causing a use-after-free when the
+		 * loop advances.
+		 *
+		 * All current callbacks are read-only diagnostics and
+		 * never acquire tcp_lock, so holding it is safe.
+		 */
 		if (atomic_get(&conn->ref_count) > 0) {
-			k_mutex_unlock(&tcp_lock);
 			cb(conn, user_data);
-			k_mutex_lock(&tcp_lock, K_FOREVER);
 		}
 	}
 
@@ -4604,7 +4635,7 @@ uint16_t net_tcp_get_supported_mss(const struct tcp *conn)
 
 #if defined(CONFIG_NET_TEST)
 struct testing_user_data {
-	struct net_sockaddr remote;
+	struct net_sockaddr_storage remote;
 	uint16_t mtu;
 };
 
@@ -4612,9 +4643,9 @@ static void testing_find_conn(struct tcp *conn, void *user_data)
 {
 	struct testing_user_data *data = user_data;
 
-	if (IS_ENABLED(CONFIG_NET_IPV6) && data->remote.sa_family == NET_AF_INET6 &&
+	if (IS_ENABLED(CONFIG_NET_IPV6) && data->remote.ss_family == NET_AF_INET6 &&
 	    net_ipv6_addr_cmp(&conn->dst.sin6.sin6_addr,
-			      &net_sin6(&data->remote)->sin6_addr)) {
+			      &net_sin6(net_sad(&data->remote))->sin6_addr)) {
 		if (data->mtu > 0) {
 			/* Set it only once */
 			return;
@@ -4626,9 +4657,9 @@ static void testing_find_conn(struct tcp *conn, void *user_data)
 		return;
 	}
 
-	if (IS_ENABLED(CONFIG_NET_IPV4) && data->remote.sa_family == NET_AF_INET &&
+	if (IS_ENABLED(CONFIG_NET_IPV4) && data->remote.ss_family == NET_AF_INET &&
 	    net_ipv4_addr_cmp(&conn->dst.sin.sin_addr,
-			      &net_sin(&data->remote)->sin_addr)) {
+			      &net_sin(net_sad(&data->remote))->sin_addr)) {
 		if (data->mtu > 0) {
 			/* Set it only once */
 			return;
@@ -4644,9 +4675,21 @@ static void testing_find_conn(struct tcp *conn, void *user_data)
 uint16_t net_tcp_get_mtu(struct net_sockaddr *dst)
 {
 	struct testing_user_data data = {
-		.remote = *dst,
 		.mtu = 0,
 	};
+	size_t addrlen;
+
+	/* Copy only the family-specific portion of the address. The caller
+	 * may pass a pointer to a net_sockaddr_in / net_sockaddr_in6, which is
+	 * smaller than the generic struct net_sockaddr, so copying the whole
+	 * struct would read past the end of the caller's object.
+	 */
+	addrlen = net_family2size(dst->sa_family);
+	if (addrlen == 0) {
+		return 0;
+	}
+
+	memcpy(&data.remote, dst, addrlen);
 
 	net_tcp_foreach(testing_find_conn, &data);
 
@@ -4726,6 +4769,25 @@ int net_tcp_get_option(struct net_context *context,
 	k_mutex_unlock(&conn->lock);
 
 	return ret;
+}
+
+int net_tcp_get_outq(struct net_context *context, int *outq_bytes)
+{
+	NET_ASSERT(context);
+
+	struct tcp *conn = context->tcp;
+
+	NET_ASSERT(conn);
+
+	if (outq_bytes == NULL) {
+		return -EINVAL;
+	}
+
+	k_mutex_lock(&conn->lock, K_FOREVER);
+	*outq_bytes = (int)MIN(conn->send_data_total, (size_t)INT_MAX);
+	k_mutex_unlock(&conn->lock);
+
+	return 0;
 }
 
 const char *net_tcp_state_str(enum tcp_state state)

@@ -21,6 +21,11 @@ tests:
       - CONFIG_ZMS_LOOKUP_CACHE=y
       - CONFIG_ZMS_LOOKUP_CACHE_SIZE=64
     platform_allow: native_sim
+  keyvalstorage.zms.cache.manual:
+    extra_configs:
+      - CONFIG_ZMS_LOOKUP_CACHE=y
+      - CONFIG_ZMS_LOOKUP_CACHE_MANUAL=y
+    platform_allow: native_sim
   keyvalstorage.zms.data_crc:
     extra_configs:
       - CONFIG_ZMS_DATA_CRC=y
@@ -46,4 +51,7 @@ tests:
       - CONFIG_ZMS_ID_64BIT=y
       - CONFIG_ZMS_LOOKUP_CACHE=y
       - CONFIG_ZMS_LOOKUP_CACHE_SIZE=64
+    platform_allow: qemu_x86
+  keyvalstorage.zms.mcxw71_sim:
+    extra_args: DTC_OVERLAY_FILE=boards/qemu_x86_mcxw71.overlay
     platform_allow: qemu_x86

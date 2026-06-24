@@ -143,6 +143,12 @@
 			status = "disabled";
 		};
 
+		crc32: crc32@40030030 {
+			compatible = "ambiq,hw-crc32";
+			reg = <0x40030030 0x4>;
+			status = "disabled";
+		};
+
 		stimer0: stimer@STIMER_BASE_NAME {
 			compatible = "ambiq,stimer";
 			reg = <STIMER_REG_BASE STIMER_REG_SIZE>;
@@ -418,14 +424,24 @@
 			status = "disabled";
 		};
 
-		spid0: spi@IOSLAVE_BASE_NAME {
-			compatible = "ambiq,spid";
+		ios0: ios@IOSLAVE_BASE_NAME {
+			compatible = "ambiq,ios";
 			reg = <IOSLAVE_REG_BASE IOSLAVE_REG_SIZE>;
-			#address-cells = <1>;
-			#size-cells = <0>;
-			interrupts = <4 0>;
-			status = "disabled";
-			zephyr,pm-device-runtime-auto;
+			interrupts = <4 0>, <5 0>;
+
+			spi {
+				compatible = "ambiq,spid";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "disabled";
+			};
+
+			i2c {
+				compatible = "ambiq,ios-i2c";
+				#address-cells = <1>;
+				#size-cells = <0>;
+				status = "disabled";
+			};
 		};
 
 		iom0: iom@IOM0_BASE_NAME {

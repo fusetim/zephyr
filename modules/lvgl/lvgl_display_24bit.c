@@ -11,8 +11,9 @@
 
 void lvgl_flush_cb_24bit(lv_display_t *display, const lv_area_t *area, uint8_t *px_map)
 {
-	uint16_t w;
-	uint16_t h;
+	uint16_t w = area->x2 - area->x1 + 1;
+	uint16_t h = area->y2 - area->y1 + 1;
+	struct lvgl_disp_data *data = (struct lvgl_disp_data *)lv_display_get_user_data(display);
 	struct lvgl_display_flush flush;
 
 #if defined(CONFIG_LV_Z_DIRECT_RENDERING)
@@ -39,8 +40,12 @@ void lvgl_flush_cb_24bit(lv_display_t *display, const lv_area_t *area, uint8_t *
 	flush.desc.height = h;
 	flush.buf = (void *)px_map;
 
-	if (IS_ENABLED(CONFIG_LV_Z_COLOR_24_BGR_TO_RGB)) {
-		/* LVGL assumes BGR byte ordering, convert to RGB */
+	/*
+	 * LVGL's RGB888 stores bytes in memory as B, G, R, which matches Zephyr's
+	 * PIXEL_FORMAT_RGB_888. For a PIXEL_FORMAT_BGR_888 panel (R, G, B in memory)
+	 * the red and blue channels have to be swapped before flushing.
+	 */
+	if (data->cap.current_pixel_format == PIXEL_FORMAT_BGR_888) {
 		for (size_t i = 0; i < flush.desc.buf_size; i += 3) {
 			uint8_t tmp = px_map[i];
 

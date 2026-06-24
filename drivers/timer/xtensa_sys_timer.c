@@ -7,7 +7,6 @@
 #include <zephyr/init.h>
 #include <zephyr/drivers/timer/system_timer.h>
 #include <zephyr/sys_clock.h>
-#include <zephyr/spinlock.h>
 #include <zephyr/irq.h>
 
 #include "xtensa_sys_timer.h"
@@ -21,7 +20,6 @@
 #define MAX_TICKS ((MAX_CYC - CYC_PER_TICK) / CYC_PER_TICK)
 #define MIN_DELAY 1000
 
-static struct k_spinlock lock;
 static unsigned int last_count;
 
 #if defined(CONFIG_TEST)
@@ -70,7 +68,7 @@ static void ccompare_isr(const void *arg)
 {
 	ARG_UNUSED(arg);
 
-	k_spinlock_key_t key = k_spin_lock(&lock);
+	k_spinlock_key_t key = sys_clock_lock();
 
 	uint32_t curr = ccount();
 	uint32_t dticks = sys_clock_elapsed_ticks(curr);
@@ -84,17 +82,17 @@ static void ccompare_isr(const void *arg)
 		set_ccompare(next - ccount_comp());
 	}
 
-	k_spin_unlock(&lock, key);
-	sys_clock_announce(IS_ENABLED(CONFIG_TICKLESS_KERNEL) ? dticks : 1);
+	sys_clock_announce_locked(IS_ENABLED(CONFIG_TICKLESS_KERNEL) ? dticks : 1, key);
 }
 
 void sys_clock_set_timeout(int32_t ticks, bool idle)
 {
+	__ASSERT(sys_clock_is_locked(), "system clock lock not held");
+
 #if defined(CONFIG_TICKLESS_KERNEL)
 	ticks = ticks == K_TICKS_FOREVER ? MAX_TICKS : ticks;
 	ticks = CLAMP(ticks - 1, 0, (int32_t)MAX_TICKS);
 
-	k_spinlock_key_t key = k_spin_lock(&lock);
 	uint32_t curr = ccount(), cyc, adj;
 
 	/* Round up to next tick boundary */
@@ -122,28 +120,23 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 			lptim_pre_idle = z_xtensa_lptim_hook_on_lpm_entry(timeout_us);
 			ccount_pre_idle = ccount();
 			timeout_idle = true;
-		} else {
-			timeout_idle = false;
 		}
 	} else {
 		ARG_UNUSED(idle);
 	}
 
-	k_spin_unlock(&lock, key);
 #endif
 }
 
 uint32_t sys_clock_elapsed(void)
 {
+	__ASSERT(sys_clock_is_locked(), "system clock lock not held");
+
 	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
 		return 0;
 	}
 
-	k_spinlock_key_t key = k_spin_lock(&lock);
-	uint32_t ret = (ccount() - last_count) / CYC_PER_TICK;
-
-	k_spin_unlock(&lock, key);
-	return ret;
+	return (ccount() - last_count) / CYC_PER_TICK;
 }
 
 uint32_t sys_clock_cycle_get_32(void)
@@ -167,7 +160,7 @@ void sys_clock_idle_exit(void)
 			return;
 		}
 
-		k_spinlock_key_t key = k_spin_lock(&lock);
+		k_spinlock_key_t key = sys_clock_lock();
 
 		uint64_t lptim_now = z_xtensa_lptim_hook_on_lpm_exit();
 		uint64_t ccount_now = ccount();
@@ -188,10 +181,8 @@ void sys_clock_idle_exit(void)
 
 		timeout_idle = false;
 
-		k_spin_unlock(&lock, key);
-
 		/* Announce corrected ticks as CCOUNT remained stalled during LPM */
-		sys_clock_announce(dticks);
+		sys_clock_announce_locked(dticks, key);
 	}
 }
 

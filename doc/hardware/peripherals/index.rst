@@ -16,7 +16,9 @@ Peripherals
    bbram.rst
    bc12.rst
    biometrics.rst
+   buzzer.rst
    clock_control.rst
+   clock_monitor.rst
    can/index.rst
    charger.rst
    comparator.rst
@@ -24,6 +26,7 @@ Peripherals
    counter.rst
    crc.rst
    dac.rst
+   dali.rst
    dma.rst
    display/index.rst
    eeprom/index.rst

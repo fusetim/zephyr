@@ -14,10 +14,8 @@
 #include <hal/mmu_hal.h>
 #include <hal/mmu_ll.h>
 
-#include <soc/hp_apm_reg.h>
-#include <soc/lp_apm_reg.h>
-#include <soc/lp_apm0_reg.h>
 #include <soc/pcr_reg.h>
+#include <hal/apm_ll.h>
 
 #include <bootloader_clock.h>
 #include <bootloader_flash.h>
@@ -28,7 +26,6 @@
 #include <flash_init.h>
 #include <soc_flash_init.h>
 #include <soc_init.h>
-#include <soc_random.h>
 
 const static char *TAG = "hw_init";
 
@@ -41,9 +38,14 @@ int hardware_init(void)
 	ana_reset_config();
 	super_wdt_auto_feed();
 
-	REG_WRITE(LP_APM_FUNC_CTRL_REG, 0);
-	REG_WRITE(LP_APM0_FUNC_CTRL_REG, 0);
-	REG_WRITE(HP_APM_FUNC_CTRL_REG, 0);
+	/*
+	 * The APM access-path filters default to enabled and only allow
+	 * masters in TEE mode. Disable them so the application (which runs in
+	 * REE mode) is not denied access to peripherals. The ESP32-H2 has no
+	 * LP_APM0 controller.
+	 */
+	apm_ll_hp_apm_enable_ctrl_filter_all(false);
+	apm_ll_lp_apm_enable_ctrl_filter_all(false);
 
 #ifdef CONFIG_BOOTLOADER_REGION_PROTECTION_ENABLE
 	esp_cpu_configure_region_protection();
@@ -93,8 +95,6 @@ int hardware_init(void)
 
 	check_wdt_reset();
 	config_wdt();
-
-	soc_random_enable();
 
 	return 0;
 }

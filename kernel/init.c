@@ -16,12 +16,12 @@
 #include <string.h>
 #include <offsets_short.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/minmax.h>
 #include <zephyr/sys/printk.h>
 #include <zephyr/debug/stack.h>
 #include <zephyr/random/random.h>
 #include <zephyr/linker/sections.h>
 #include <zephyr/toolchain.h>
-#include <zephyr/kernel_structs.h>
 #include <zephyr/device.h>
 #include <zephyr/init.h>
 #include <zephyr/linker/linker-defs.h>
@@ -40,26 +40,25 @@
 #include <zephyr/logging/log.h>
 #include <zephyr/internal/syscall_handler.h>
 #include <zephyr/arch/common/init.h>
+#include <scheduler.h>
 
 LOG_MODULE_REGISTER(os, CONFIG_KERNEL_LOG_LEVEL);
 
 /* the only struct z_kernel instance */
-__pinned_bss
 struct z_kernel _kernel;
 
 #ifdef CONFIG_PM
-__pinned_bss atomic_t _cpus_active;
+atomic_t _cpus_active;
 #endif
 
 /* init/main and idle threads */
-K_THREAD_PINNED_STACK_DEFINE(z_main_stack, CONFIG_MAIN_STACK_SIZE);
+K_THREAD_STACK_DEFINE(z_main_stack, CONFIG_MAIN_STACK_SIZE);
 struct k_thread z_main_thread;
 
 #ifdef CONFIG_MULTITHREADING
-__pinned_bss
 struct k_thread z_idle_threads[CONFIG_MP_MAX_NUM_CPUS];
 
-static K_KERNEL_PINNED_STACK_ARRAY_DEFINE(z_idle_stacks,
+static K_KERNEL_STACK_ARRAY_DEFINE(z_idle_stacks,
 					  CONFIG_MP_MAX_NUM_CPUS,
 					  CONFIG_IDLE_STACK_SIZE);
 
@@ -146,7 +145,7 @@ extern const struct init_entry __init_SMP_start[];
  * of this area is safe since interrupts are disabled until the kernel context
  * switches to the init thread.
  */
-K_KERNEL_PINNED_STACK_ARRAY_DEFINE(z_interrupt_stacks,
+K_KERNEL_STACK_ARRAY_DEFINE(z_interrupt_stacks,
 				   CONFIG_MP_MAX_NUM_CPUS,
 				   CONFIG_ISR_STACK_SIZE);
 
@@ -187,7 +186,6 @@ extern volatile uintptr_t __stack_chk_guard;
 #endif /* CONFIG_STACK_CANARIES_TLS */
 #endif /* CONFIG_REQUIRES_STACK_CANARIES */
 
-__pinned_bss
 bool z_sys_post_kernel;
 
 /* defined in device.c */
@@ -249,10 +247,6 @@ static void z_sys_init_run_level(enum init_level level)
 	}
 }
 
-/* defined in banner.c */
-extern void boot_banner(void);
-
-
 #ifdef CONFIG_STATIC_INIT_GNU
 
 extern void (*__zephyr_init_array_start[])();
@@ -308,7 +302,6 @@ static void bg_thread_main(void *unused1, void *unused2, void *unused3)
 #if defined(CONFIG_STACK_POINTER_RANDOM) && (CONFIG_STACK_POINTER_RANDOM != 0)
 	z_stack_adjust_initialized = 1;
 #endif /* CONFIG_STACK_POINTER_RANDOM */
-	boot_banner();
 
 #ifdef CONFIG_STATIC_INIT_GNU
 	z_static_init_gnu();
@@ -336,10 +329,10 @@ static void bg_thread_main(void *unused1, void *unused2, void *unused3)
 
 #ifdef CONFIG_BOOTARGS
 	extern int main(int, char **);
-	extern char **prepare_main_args(int *argc);
+	extern char **sys_boot_prepare_main_args(int *argc);
 
 	int argc = 0;
-	char **argv = prepare_main_args(&argc);
+	char **argv = sys_boot_prepare_main_args(&argc);
 	(void)main(argc, argv);
 #else
 	extern int main(void);
@@ -491,13 +484,14 @@ static FUNC_NORETURN void switch_to_main_thread(char *stack_ptr)
 #endif /* CONFIG_MULTITHREADING */
 
 __boot_func
+FUNC_NO_STACK_PROTECTOR
 void __weak z_early_rand_get(uint8_t *buf, size_t length)
 {
 	static uint64_t state = (uint64_t)CONFIG_TIMER_RANDOM_INITIAL_STATE;
 	int rc;
 
 #ifdef CONFIG_ENTROPY_HAS_DRIVER
-	const struct device *const entropy = DEVICE_DT_GET_OR_NULL(DT_CHOSEN(zephyr_entropy));
+	const struct device *const entropy = entropy_get_default_device();
 
 	if ((entropy != NULL) && device_is_ready(entropy)) {
 		/* Try to see if driver provides an ISR-specific API */

@@ -34,18 +34,23 @@ common:
         \ key <alpha/beta/source>"
 
 tests:
-  sample.subsys.settings.nvs:
+  sample.settings.nvs:
     filter: dt_label_with_parent_compat_enabled("storage_partition", "fixed-partitions")
+            or dt_label_compat_enabled("storage_partition", "zephyr,mapped-partition")
+            and not CONFIG_RISCV_CORE_NORDIC_VPR
     platform_exclude:
+      - nucleo_f746zg
       - nucleo_h723zg
-      - stm32h735g_disco
       - nucleo_h743zi
-      - stm32h745i_disco/stm32h745xx/m7
       - nucleo_h745zi_q/stm32h745xx/m7
-      - stm32h747i_disco/stm32h747xx/m7
-      - stm32h750b_dk
+      - stm32h745i_disco/stm32h745xx/m7
       - nucleo_h753zi
       - nucleo_h755zi_q/stm32h755xx/m7
+      - stm32h735g_disco
+      - stm32h747i_disco/stm32h747xx/m7
+      - stm32h750b_dk
+      - stm32h7s78_dk
+      - stm32n6570_dk/stm32n657xx/sb
       - qemu_cortex_m0/nrf51822
     integration_platforms:
       - native_sim
@@ -56,7 +61,8 @@ tests:
       - CONFIG_SETTINGS_NVS=y
       - CONFIG_MPU_ALLOW_FLASH_WRITE=y
 
-  sample.subsys.settings.tfm-ps:
+  sample.settings.tfm-ps:
+    timeout: 30
     tags:
       - trusted-firmware-m
     filter: CONFIG_TFM_PARTITION_PROTECTED_STORAGE
@@ -66,7 +72,7 @@ tests:
       - CONFIG_SETTINGS_TFM_PSA=y
       - CONFIG_SETTINGS_TFM_PSA_BACKEND_PS=y
 
-  sample.subsys.settings.tfm-its:
+  sample.settings.tfm-its:
     tags:
       - trusted-firmware-m
     filter: CONFIG_TFM_PARTITION_INTERNAL_TRUSTED_STORAGE

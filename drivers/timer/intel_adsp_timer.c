@@ -6,7 +6,6 @@
 #include <zephyr/init.h>
 #include <zephyr/drivers/timer/system_timer.h>
 #include <zephyr/sys_clock.h>
-#include <zephyr/spinlock.h>
 #include <zephyr/drivers/interrupt_controller/dw_ace.h>
 
 #include <cavs-idc.h>
@@ -44,7 +43,6 @@ BUILD_ASSERT(COMPARATOR_IDX >= 0 && COMPARATOR_IDX <= 1);
 
 #define DSP_WCT_CS_TT(x)                     BIT(4 + x)
 
-static struct k_spinlock lock;
 static uint64_t last_count;
 
 /* Not using current syscon driver due to overhead due to MMU support */
@@ -106,7 +104,7 @@ static void compare_isr(const void *arg)
 	uint64_t curr;
 	uint64_t dticks;
 
-	k_spinlock_key_t key = k_spin_lock(&lock);
+	k_spinlock_key_t key = sys_clock_lock();
 
 	curr = count();
 	dticks = (curr - last_count) / CYC_PER_TICK;
@@ -126,32 +124,23 @@ static void compare_isr(const void *arg)
 	set_compare(next);
 #endif
 
-	k_spin_unlock(&lock, key);
-
-	sys_clock_announce((int32_t)dticks);
+	sys_clock_announce_locked((int32_t)dticks, key);
 }
 
 void sys_clock_set_timeout(int32_t ticks, bool idle)
 {
 	ARG_UNUSED(idle);
 
+	__ASSERT(sys_clock_is_locked(), "system clock lock not held");
+
 #ifdef CONFIG_TICKLESS_KERNEL
 	ticks = ticks == K_TICKS_FOREVER ? MAX_TICKS : ticks;
-	ticks = CLAMP(ticks - 1, 0, (int32_t)MAX_TICKS);
+	ticks = CLAMP(ticks, 0, (int32_t)MAX_TICKS);
 
-	k_spinlock_key_t key = k_spin_lock(&lock);
 	uint64_t curr = count();
 	uint64_t next;
-	uint32_t adj, cyc = ticks * CYC_PER_TICK;
+	uint32_t cyc = ticks * CYC_PER_TICK;
 
-	/* Round up to next tick boundary */
-	adj = (uint32_t)(curr - last_count) + (CYC_PER_TICK - 1);
-	if (cyc <= MAX_CYC - adj) {
-		cyc += adj;
-	} else {
-		cyc = MAX_CYC;
-	}
-	cyc = (cyc / CYC_PER_TICK) * CYC_PER_TICK;
 	next = last_count + cyc;
 
 	if (((uint32_t)next - (uint32_t)curr) < MIN_DELAY) {
@@ -159,19 +148,18 @@ void sys_clock_set_timeout(int32_t ticks, bool idle)
 	}
 
 	set_compare(next);
-	k_spin_unlock(&lock, key);
 #endif
 }
 
 uint32_t sys_clock_elapsed(void)
 {
+	__ASSERT(sys_clock_is_locked(), "system clock lock not held");
+
 	if (!IS_ENABLED(CONFIG_TICKLESS_KERNEL)) {
 		return 0;
 	}
-	k_spinlock_key_t key = k_spin_lock(&lock);
 	uint64_t ret = (count() - last_count) / CYC_PER_TICK;
 
-	k_spin_unlock(&lock, key);
 	return (uint32_t)ret;
 }
 

@@ -305,18 +305,7 @@ static int mcux_flexcan_start(const struct device *dev)
 	timing.rJumpwidth = data->timing.sjw - 1U;
 	timing.phaseSeg1 = data->timing.phase_seg1 - 1U;
 	timing.phaseSeg2 = data->timing.phase_seg2 - 1U;
-#if (defined(FSL_FEATURE_FLEXCAN_HAS_ENHANCED_BIT_TIMING_REG) && \
-	     FSL_FEATURE_FLEXCAN_HAS_ENHANCED_BIT_TIMING_REG)
-	if (UTIL_AND(IS_ENABLED(CONFIG_CAN_MCUX_FLEXCAN_FD), config->flexcan_fd)) {
-		/* No propagation segment configuration, so prop_seg must be 0 */
-		timing.propSeg = data->timing.prop_seg;
-	} else {
-		/* Use standard configuration for classic CAN mode */
-		timing.propSeg = data->timing.prop_seg - 1U;
-	}
-#else
 	timing.propSeg = data->timing.prop_seg - 1U;
-#endif
 	FLEXCAN_SetTimingConfig(base, &timing);
 
 #ifdef CONFIG_CAN_MCUX_FLEXCAN_FD
@@ -1146,7 +1135,7 @@ static FLEXCAN_CALLBACK(mcux_flexcan_transfer_callback)
 		 * Unhandled status during Message Buffer processing.
 		 * If result field is 0xFF, it means no message buffer interrupt occurred.
 		 */
-		__fallthrough;
+		break;
 	default:
 		LOG_WRN("Unhandled status 0x%08x (result = 0x%016llx)",
 			status, status_flags);
@@ -1160,7 +1149,7 @@ static void mcux_flexcan_isr(const struct device *dev)
 	CAN_Type *base = get_base(dev);
 
 	FLEXCAN_BusoffErrorHandleIRQ(base, &data->handle);
-	FLEXCAN_MbHandleIRQ(base, &data->handle, 0U, config->number_of_mb);
+	FLEXCAN_MbHandleIRQ(base, &data->handle, 0U, config->number_of_mb - 1U);
 }
 
 static int mcux_flexcan_init(const struct device *dev)
@@ -1174,13 +1163,13 @@ static int mcux_flexcan_init(const struct device *dev)
 
 	if (config->common.phy != NULL) {
 		if (!device_is_ready(config->common.phy)) {
-			LOG_ERR("CAN transceiver not ready");
+			LOG_ERR_DEVICE_NOT_READY(config->common.phy);
 			return -ENODEV;
 		}
 	}
 
 	if (!device_is_ready(config->clock_dev)) {
-		LOG_ERR("clock device not ready");
+		LOG_ERR_DEVICE_NOT_READY(config->clock_dev);
 		return -ENODEV;
 	}
 
@@ -1294,11 +1283,6 @@ static int mcux_flexcan_init(const struct device *dev)
 
 #ifdef CONFIG_CAN_MCUX_FLEXCAN_FD
 	if (config->flexcan_fd) {
-#if (defined(FSL_FEATURE_FLEXCAN_HAS_ENHANCED_BIT_TIMING_REG) && \
-	     FSL_FEATURE_FLEXCAN_HAS_ENHANCED_BIT_TIMING_REG)
-		/* No propagation segment configuration, so prop_seg must be 0 */
-		flexcan_config.timingConfig.propSeg = data->timing.prop_seg;
-#endif
 		flexcan_config.timingConfig.frJumpwidth = data->timing_data.sjw - 1U;
 		flexcan_config.timingConfig.fpropSeg = data->timing_data.prop_seg;
 		flexcan_config.timingConfig.fphaseSeg1 = data->timing_data.phase_seg1 - 1U;

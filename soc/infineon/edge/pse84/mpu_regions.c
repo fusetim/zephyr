@@ -1,13 +1,12 @@
 /*
- * Copyright (c) 2025 Infineon Technologies AG,
- * or an affiliate of Infineon Technologies AG.
+ * SPDX-FileCopyrightText: <text>Copyright (c) 2026 Infineon Technologies AG,
+ * or an affiliate of Infineon Technologies AG. All rights reserved.</text>
  *
  * SPDX-License-Identifier: Apache-2.0
  */
 
 #include <zephyr/devicetree.h>
 #include <zephyr/arch/arm/mpu/arm_mpu_mem_cfg.h>
-
 
 /* We are expected to give *CONFIG_SIZE* in KB, but REGION_ATTR
  * expects bytes, so we multiply by 1024 to convert.
@@ -22,18 +21,45 @@ static const struct arm_mpu_region mpu_regions[] = {
 
 	MPU_REGION_ENTRY(
 		"SRAM",
-		CONFIG_SRAM_BASE_ADDRESS,
-		REGION_RAM_ATTR_WITH_EXEC(
-			CONFIG_SRAM_BASE_ADDRESS,
-			CONFIG_SRAM_SIZE * 1024)),
+		 DT_CHOSEN_SRAM_ADDR,
+		REGION_RAM_ATTR(
+			DT_CHOSEN_SRAM_ADDR,
+			DT_CHOSEN_SRAM_SIZE)),
 
 #if DT_NODE_EXISTS(DT_NODELABEL(m33_allocatable_shared))
 	MPU_REGION_ENTRY(
-		"SHARED_MEMORY",
+		"SHARED_MEMORY_33",
 		DT_REG_ADDR(DT_NODELABEL(m33_allocatable_shared)),
 		REGION_RAM_NOCACHE_ATTR(
 			DT_REG_ADDR(DT_NODELABEL(m33_allocatable_shared)),
 			DT_REG_SIZE(DT_NODELABEL(m33_allocatable_shared)))),
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(m55_allocatable_shared))
+	MPU_REGION_ENTRY(
+		"SHARED_MEMORY 55",
+		DT_REG_ADDR(DT_NODELABEL(m55_allocatable_shared)),
+		REGION_RAM_NOCACHE_ATTR(
+			DT_REG_ADDR(DT_NODELABEL(m55_allocatable_shared)),
+			DT_REG_SIZE(DT_NODELABEL(m55_allocatable_shared)))),
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(m33s_code))
+	MPU_REGION_ENTRY(
+		"M33S_CODE",
+		DT_REG_ADDR(DT_NODELABEL(m33s_code)),
+		REGION_RAM_ATTR_WITH_EXEC(
+			DT_REG_ADDR(DT_NODELABEL(m33s_code)),
+			DT_REG_SIZE(DT_NODELABEL(m33s_code)))),
+#endif
+
+#if DT_NODE_EXISTS(DT_NODELABEL(m33_code))
+	MPU_REGION_ENTRY(
+		"M33_CODE",
+		DT_REG_ADDR(DT_NODELABEL(m33_code)),
+		REGION_RAM_ATTR_WITH_EXEC(
+			DT_REG_ADDR(DT_NODELABEL(m33_code)),
+			DT_REG_SIZE(DT_NODELABEL(m33_code)))),
 #endif
 
 #if DT_NODE_EXISTS(DT_NODELABEL(itcm))

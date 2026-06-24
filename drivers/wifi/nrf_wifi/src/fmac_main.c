@@ -249,9 +249,17 @@ void nrf_wifi_disp_scan_res_work_handler(struct k_work *work)
 	status = nrf_wifi_disp_scan_res_get_zep(vif_ctx_zep);
 	if (status != NRF_WIFI_STATUS_SUCCESS) {
 		LOG_ERR("%s: nrf_wifi_disp_scan_res_get_zep failed", __func__);
-		return;
+
+#ifdef CONFIG_NET_L2_WIFI_MGMT
+		if (vif_ctx_zep->disp_scan_cb) {
+			vif_ctx_zep->disp_scan_cb(vif_ctx_zep->zep_net_if_ctx, -EIO, NULL);
+			vif_ctx_zep->disp_scan_cb = NULL;
+		}
+#endif /* CONFIG_NET_L2_WIFI_MGMT */
+
+		vif_ctx_zep->scan_in_progress = false;
+		k_work_cancel_delayable(&vif_ctx_zep->scan_timeout_work);
 	}
-	vif_ctx_zep->scan_in_progress = false;
 }
 
 #ifdef CONFIG_NRF70_STA_MODE
@@ -318,7 +326,9 @@ void nrf_wifi_event_get_reg_zep(void *vif_ctx,
 	fmac_dev_ctx->alpha2_valid = true;
 }
 
-int nrf_wifi_reg_domain(const struct device *dev, struct wifi_reg_domain *reg_domain)
+int nrf_wifi_reg_domain(const struct device *dev,
+			struct net_if *iface __unused,
+			struct wifi_reg_domain *reg_domain)
 {
 	enum nrf_wifi_status status = NRF_WIFI_STATUS_FAIL;
 	struct nrf_wifi_ctx_zep *rpu_ctx_zep = NULL;

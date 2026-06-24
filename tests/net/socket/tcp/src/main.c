@@ -97,6 +97,10 @@ static void test_accept(int sock, int *new_sock, struct net_sockaddr *addr,
 {
 	zassert_not_null(new_sock, "null newsock");
 
+	if ((addr != NULL) && (addrlen != NULL)) {
+		(void)memset(addr, 0, *addrlen);
+	}
+
 	*new_sock = zsock_accept(sock, addr, addrlen);
 	zassert_true(*new_sock >= 0, "accept failed");
 }
@@ -105,6 +109,10 @@ static void test_accept_timeout(int sock, int *new_sock, struct net_sockaddr *ad
 				net_socklen_t *addrlen)
 {
 	zassert_not_null(new_sock, "null newsock");
+
+	if ((addr != NULL) && (addrlen != NULL)) {
+		(void)memset(addr, 0, *addrlen);
+	}
 
 	*new_sock = zsock_accept(sock, addr, addrlen);
 	zassert_equal(*new_sock, -1, "accept succeed");
@@ -158,7 +166,7 @@ static void test_recvmsg(int sock,
 	recved = zsock_recvmsg(sock, msg, flags);
 
 	zassert_equal(recved, expected,
-		      "line %d, unexpected received bytes (%d vs %d)",
+		      "line %d, unexpected received bytes (%zd vs %zu)",
 		      line, recved, expected);
 }
 
@@ -313,7 +321,7 @@ ZTEST_USER(net_socket_tcp, test_v6_send_recv)
 	k_sleep(TCP_TEARDOWN_TIMEOUT);
 }
 
-/* Test the stack behavior with a resonable sized block data, be sure to have multiple packets */
+/* Test the stack behavior with a reasonable sized block data, be sure to have multiple packets */
 #define TEST_LARGE_TRANSFER_SIZE 60000
 #define TEST_PRIME 811
 
@@ -352,8 +360,9 @@ void tcp_server_block_thread(void *vps_sock, void *unused2, void *unused3)
 		recved = zsock_recv(new_sock, buffer, chunk_size, 0);
 
 		zassert(recved > 0, "received bigger then 0",
-			"Error receiving bytes %i bytes, got %i on top of %i in iteration %i, errno %i",
-			chunk_size,	recved, total_received, iteration, errno);
+			"Error receiving bytes %zu bytes, got %zu on top of %zu in iteration %i, "
+			"errno %i",
+			chunk_size, recved, total_received, iteration, errno);
 
 		/* Validate the contents */
 		for (int i = 0; i < recved; i++) {
@@ -438,7 +447,7 @@ void test_send_recv_large_common(int tcp_nodelay, int family)
 		int send_bytes = zsock_send(c_sock, buffer, chunk_size, 0);
 
 		zassert(send_bytes > 0, "send_bytes bigger then 0",
-			"Error sending %i bytes on top of %i, got %i in iteration %i, errno %i",
+			"Error sending %zu bytes on top of %zu, got %i in iteration %i, errno %i",
 			chunk_size, total_send, send_bytes, iteration, errno);
 		total_send += send_bytes;
 		iteration++;
@@ -582,7 +591,7 @@ ZTEST(net_socket_tcp, test_v4_broken_link)
 
 	net_mgmt(NET_REQUEST_STATS_GET_ALL, NULL, &after, sizeof(after));
 
-	zassert_equal(before.ipv4.sent, after.ipv4.sent, "Data sent afer connection timeout");
+	zassert_equal(before.ipv4.sent, after.ipv4.sent, "Data sent after connection timeout");
 
 	test_close(c_sock);
 	test_close(new_sock);
@@ -1259,6 +1268,60 @@ ZTEST(net_socket_tcp, test_async_connect)
 	test_close(c_sock);
 	test_close(s_sock);
 	test_close(new_sock);
+
+	test_context_cleanup();
+}
+
+ZTEST(net_socket_tcp, test_async_connect_socket_close)
+{
+	int c_sock;
+	int s_sock;
+	int new_sock;
+	struct net_sockaddr_in c_saddr;
+	struct net_sockaddr_in s_saddr;
+	struct zsock_pollfd poll_fds[1];
+	int poll_rc;
+
+	prepare_sock_tcp_v4(MY_IPV4_ADDR, ANY_PORT, &c_sock, &c_saddr);
+	prepare_sock_tcp_v4(MY_IPV4_ADDR, SERVER_PORT, &s_sock, &s_saddr);
+	test_fcntl(c_sock, ZVFS_F_SETFL, ZVFS_O_NONBLOCK);
+	test_fcntl(s_sock, ZVFS_F_SETFL, ZVFS_O_NONBLOCK);
+
+	test_bind(s_sock, (struct net_sockaddr *)&s_saddr, sizeof(s_saddr));
+	test_listen(s_sock);
+
+	/* Drop all packets so that initial SYN is lost */
+	loopback_set_packet_drop_ratio(1.0f);
+
+	/* And start async TCP handshake */
+	zassert_equal(zsock_connect(c_sock, (struct net_sockaddr *)&s_saddr, sizeof(s_saddr)),
+		      -1,
+		      "connect shouldn't complete right away");
+	zassert_equal(errno, EINPROGRESS,
+		      "connect should be in progress, got %i", errno);
+
+	/* Add small delay to let other threads run */
+	k_msleep(THREAD_SLEEP);
+
+	/* Close client socket during the async handshake and restore the
+	 * communication
+	 */
+	test_close(c_sock);
+	restore_packet_loss_ratio();
+
+	/* Monitor server socket for incoming connections - no new connection
+	 * should be established
+	 */
+	poll_fds[0].fd = s_sock;
+	poll_fds[0].events = ZSOCK_POLLIN;
+	poll_rc = zsock_poll(poll_fds, 1, 500);
+	zassert_equal(poll_rc, 0, "poll should return 0, got %i", poll_rc);
+
+	new_sock = zsock_accept(s_sock, NULL, 0);
+	zassert_equal(new_sock, -1, "non-blocking zsock_accept() should've failed");
+	zassert_equal(errno, EAGAIN, "expected EAGAIN on zsock_accept()");
+
+	test_close(s_sock);
 
 	test_context_cleanup();
 }
@@ -2172,7 +2235,7 @@ ZTEST(net_socket_tcp, test_close_while_accept)
 	int s_sock;
 	int new_sock;
 	struct net_sockaddr_in6 s_saddr;
-	struct net_sockaddr addr;
+	struct net_sockaddr_in6 addr = { 0 };
 	net_socklen_t addrlen = sizeof(addr);
 	struct close_data close_work_data;
 
@@ -2189,7 +2252,7 @@ ZTEST(net_socket_tcp, test_close_while_accept)
 	/* Start blocking accept(), which should be unblocked by close() from
 	 * another thread and return an error.
 	 */
-	new_sock = zsock_accept(s_sock, &addr, &addrlen);
+	new_sock = zsock_accept(s_sock, (struct net_sockaddr *)&addr, &addrlen);
 	zassert_equal(new_sock, -1, "accept did not return error");
 	zassert_equal(errno, EINTR, "Unexpected errno value: %d", errno);
 
@@ -2277,7 +2340,7 @@ static void test_ioctl_fionread_common(int af)
 		zassert_equal(1, write(fd[i], "\x73", 1));
 		k_msleep(100);
 		zassert_ok(zsock_ioctl(fd[j], ZFD_IOCTL_FIONREAD, &avail));
-		zassert_equal(ARRAY_SIZE(bytes), avail, "exp: %d: act: %d", ARRAY_SIZE(bytes),
+		zassert_equal(ARRAY_SIZE(bytes), avail, "exp: %zd: act: %d", ARRAY_SIZE(bytes),
 			      avail);
 	}
 
@@ -2305,6 +2368,87 @@ ZTEST(net_socket_tcp, test_ioctl_fionread_v4)
 ZTEST(net_socket_tcp, test_ioctl_fionread_v6)
 {
 	test_ioctl_fionread_common(NET_AF_INET6);
+}
+
+static void test_ioctl_fionwrite_wait_until_empty(int sock)
+{
+	int avail = -1;
+
+	for (int i = 0; i < 300; ++i) {
+		zassert_ok(zsock_ioctl(sock, ZFD_IOCTL_FIONWRITE, &avail));
+		if (avail == 0) {
+			return;
+		}
+
+		k_msleep(10);
+	}
+
+	zassert_equal(0, avail, "exp: %d: act: %d", 0, avail);
+}
+
+static void test_ioctl_fionwrite_common(int af)
+{
+	int avail = -1;
+	int ret;
+	int fd[] = {-1, -1, -1};
+
+	test_ioctl_fionread_setup(af, fd);
+
+	/* Send queue should be empty on a newly created socket */
+	zassert_ok(zsock_ioctl(fd[CLIENT], ZFD_IOCTL_FIONWRITE, &avail));
+	zassert_equal(0, avail, "exp: %d: act: %d", 0, avail);
+
+	zassert_equal(loopback_set_packet_drop_ratio(1.0f), 0,
+		      "cannot set packet loss");
+
+	ret = zsock_send(fd[CLIENT], TEST_STR_SMALL, strlen(TEST_STR_SMALL),
+			 ZSOCK_MSG_DONTWAIT);
+	zassert_equal(ret, strlen(TEST_STR_SMALL), "unexpected small send %d", ret);
+
+	/* With all loopback packets dropped, sent bytes remain queued */
+	avail = -1;
+	zassert_ok(zsock_ioctl(fd[CLIENT], ZFD_IOCTL_FIONWRITE, &avail));
+	zassert_equal(strlen(TEST_STR_SMALL), avail, "exp: %zd: act: %d",
+		      strlen(TEST_STR_SMALL), avail);
+
+	/* Once packets are delivered, FIONWRITE returns 0 again */
+	restore_packet_loss_ratio();
+	test_ioctl_fionwrite_wait_until_empty(fd[CLIENT]);
+
+	test_close(fd[CLIENT]);
+	test_close(fd[SERVER]);
+	test_close(fd[ACCEPT]);
+	test_context_cleanup();
+}
+
+ZTEST(net_socket_tcp, test_ioctl_fionwrite_v4)
+{
+	test_ioctl_fionwrite_common(NET_AF_INET);
+}
+
+ZTEST(net_socket_tcp, test_ioctl_fionwrite_v6)
+{
+	test_ioctl_fionwrite_common(NET_AF_INET6);
+}
+
+/* Listening sockets must return EINVAL for FIONWRITE since they don't have a send queue */
+ZTEST(net_socket_tcp, test_ioctl_fionwrite_listen)
+{
+	struct net_sockaddr_in addr;
+	int avail = -1;
+	int fd;
+	int ret;
+
+	prepare_sock_tcp_v4(MY_IPV4_ADDR, SERVER_PORT, &fd, &addr);
+	test_bind(fd, (struct net_sockaddr *)&addr, sizeof(addr));
+	test_listen(fd);
+
+	ret = zsock_ioctl(fd, ZFD_IOCTL_FIONWRITE, &avail);
+	zassert_equal(ret, -1, "FIONWRITE unexpectedly succeeded");
+	zassert_equal(errno, EINVAL, "unexpected errno %d", errno);
+
+	test_close(fd);
+	test_context_cleanup();
 }
 
 /* Connect to peer which is not listening the test port and

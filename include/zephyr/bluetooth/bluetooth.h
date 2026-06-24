@@ -34,6 +34,7 @@
 #include <zephyr/bluetooth/gap.h>
 #include <zephyr/bluetooth/addr.h>
 #include <zephyr/bluetooth/crypto.h>
+#include <zephyr/bluetooth/data.h>
 #include <zephyr/bluetooth/hci_types.h>
 #include <zephyr/bluetooth/classic/classic.h>
 #include <zephyr/net_buf.h>
@@ -526,94 +527,6 @@ int bt_id_reset(uint8_t id, bt_addr_le_t *addr, uint8_t *irk);
 int bt_id_delete(uint8_t id);
 
 /**
- * @brief Bluetooth data serialized size.
- *
- * Get the size of a serialized @ref bt_data given its data length.
- *
- * Size of 'AD Structure'->'Length' field, equal to 1.
- * Size of 'AD Structure'->'Data'->'AD Type' field, equal to 1.
- * Size of 'AD Structure'->'Data'->'AD Data' field, equal to data_len.
- *
- * See Core Specification Version 5.4 Vol. 3 Part C, 11, Figure 11.1.
- */
-#define BT_DATA_SERIALIZED_SIZE(data_len) ((data_len) + 2)
-
-/**
- * @brief Bluetooth data.
- *
- * @details Description of different AD Types that can be encoded into advertising data. Used to
- * form arrays that are passed to the @ref bt_le_adv_start function. The @ref BT_DATA define can
- * be used as a helpter to declare the elements of an @ref bt_data array.
- */
-struct bt_data {
-	/** Type of scan response data or advertisement data. */
-	uint8_t type;
-	/** Length of scan response data or advertisement data. */
-	uint8_t data_len;
-	/** Pointer to Scan response or advertisement data. */
-	const uint8_t *data;
-};
-
-/**
- * @brief Helper to declare elements of bt_data arrays
- *
- * This macro is mainly for creating an array of struct bt_data
- * elements which is then passed to e.g. @ref bt_le_adv_start function.
- *
- * @param _type Type of advertising data field
- * @param _data Pointer to the data field payload
- * @param _data_len Number of octets behind the _data pointer
- */
-#define BT_DATA(_type, _data, _data_len) \
-	{ \
-		.type = (_type), \
-		.data_len = (_data_len), \
-		.data = (const uint8_t *)(_data), \
-	}
-
-/**
- * @brief Helper to declare elements of bt_data arrays
- *
- * This macro is mainly for creating an array of struct bt_data
- * elements which is then passed to e.g. @ref bt_le_adv_start function.
- *
- * @param _type Type of advertising data field
- * @param _bytes Variable number of single-byte parameters
- */
-#define BT_DATA_BYTES(_type, _bytes...) \
-	BT_DATA(_type, ((uint8_t []) { _bytes }), \
-		sizeof((uint8_t []) { _bytes }))
-
-/**
- * @brief Get the total size (in octets) of a given set of @ref bt_data
- * structures.
- *
- * The total size includes the length (1 octet) and type (1 octet) fields for each element, plus
- * their respective data lengths.
- *
- * @param[in] data Array of @ref bt_data structures.
- * @param[in] data_count Number of @ref bt_data structures in @p data.
- *
- * @return Size of the concatenated data, built from the @ref bt_data structure set.
- */
-size_t bt_data_get_len(const struct bt_data data[], size_t data_count);
-
-/**
- * @brief Serialize a @ref bt_data struct into an advertising structure (a flat array).
- *
- * The data are formatted according to the Bluetooth Core Specification v. 5.4,
- * vol. 3, part C, 11.
- *
- * @param[in]  input Single @ref bt_data structure to read from.
- * @param[out] output Buffer large enough to store the advertising structure in
- *             @p input. The size of it must be at least the size of the
- *             `input->data_len + 2` (for the type and the length).
- *
- * @return Number of octets written in @p output.
- */
-size_t bt_data_serialize(const struct bt_data *input, uint8_t *output);
-
-/**
  * @brief Local Bluetooth LE controller features and capabilities.
  *
  * @details This struct provides details about the Bluetooth LE controller's supported features,
@@ -865,8 +778,6 @@ enum bt_le_adv_opt {
 	 * This is an advanced feature; most users will want to enable
 	 * @kconfig{CONFIG_BT_EXT_ADV} instead.
 	 *
-	 * @note Not implemented when @kconfig{CONFIG_BT_PRIVACY}.
-	 *
 	 * @note Mutually exclusive with BT_LE_ADV_OPT_USE_IDENTITY.
 	 */
 	BT_LE_ADV_OPT_USE_NRPA = BIT(19),
@@ -950,8 +861,10 @@ struct bt_le_adv_param {
 	 * Advertising Interval. The Minimum Advertising Interval and Maximum Advertising Interval
 	 * aren't recommended to be the same value to enable the Controller to determine the best
 	 * advertising interval given other activities.
-	 * (See Bluetooth Core Spec 6.0, Vol 4, Part E, section 7.8.5)
-	 * Range: 0x0020 to 0x4000
+	 * (See Bluetooth Core Spec 6.2, Vol 4, Part E, section 7.8.5)
+	 * Range for legacy advertising: 0x0020 to 0x4000
+	 * (See Bluetooth Core Spec 6.2, Vol 4, Part E, section 7.8.53)
+	 * Range for extended advertising: 0x0020 to 0xFFFFFF
 	 */
 	uint32_t interval_min;
 
@@ -962,8 +875,10 @@ struct bt_le_adv_param {
 	 * Advertising Interval. The Minimum Advertising Interval and Maximum Advertising Interval
 	 * aren't recommended to be the same value to enable the Controller to determine the best
 	 * advertising interval given other activities.
-	 * (See Bluetooth Core Spec 6.0, Vol 4, Part E, section 7.8.5)
-	 * Range: 0x0020 to 0x4000
+	 * (See Bluetooth Core Spec 6.2, Vol 4, Part E, section 7.8.5)
+	 * Range for legacy advertising: 0x0020 to 0x4000
+	 * (See Bluetooth Core Spec 6.2, Vol 4, Part E, section 7.8.53)
+	 * Range for extended advertising: 0x0020 to 0xFFFFFF
 	 */
 	uint32_t interval_max;
 
@@ -1561,7 +1476,7 @@ struct bt_le_ext_adv_info {
 	/** Local identity handle. */
 	uint8_t                    id;
 
-	/** Currently selected Transmit Power (dBM). */
+	/** Currently selected Transmit Power in dBm. Range: -127 to +20. */
 	int8_t                     tx_power;
 
 	/** Advertising Set ID */
@@ -1597,7 +1512,9 @@ int bt_le_ext_adv_get_info(const struct bt_le_ext_adv *adv,
  * and will be called for any discovered LE device.
  *
  * @param addr Advertiser LE address and type.
- * @param rssi Strength of advertiser signal.
+ * @param rssi Strength of advertiser signal in dBm. Range: -127 to +20.
+ *             May be set to @ref BT_GAP_RSSI_INVALID when the value is not
+ *             available.
  * @param adv_type Type of advertising response from advertiser.
  *                 Uses the @ref bt_gap_adv_type values.
  * @param buf Buffer containing advertiser data.
@@ -1809,10 +1726,18 @@ struct bt_le_per_adv_sync_recv_info {
 	/** Advertising Set Identifier, valid range @ref BT_GAP_SID_MIN to @ref BT_GAP_SID_MAX. */
 	uint8_t sid;
 
-	/** The TX power of the advertisement. */
+	/** @brief The TX power of the advertisement in dBm.
+	 *
+	 *  Range: -127 to +20. May be set to @ref BT_GAP_TX_POWER_INVALID when the
+	 *  value is not available.
+	 */
 	int8_t tx_power;
 
-	/** The RSSI of the advertisement excluding any CTE. */
+	/** @brief The RSSI of the advertisement (excluding any CTE), in dBm.
+	 *
+	 *  Range: -127 to +20. May be set to @ref BT_GAP_RSSI_INVALID when the value
+	 *  is not available.
+	 */
 	int8_t rssi;
 
 	/** The Constant Tone Extension (CTE) of the advertisement (@ref bt_df_cte_type) */
@@ -2449,10 +2374,18 @@ struct bt_le_scan_recv_info {
 	/** Advertising Set Identifier, valid range @ref BT_GAP_SID_MIN to @ref BT_GAP_SID_MAX. */
 	uint8_t sid;
 
-	/** Strength of advertiser signal. */
+	/** @brief Strength of advertiser signal in dBm.
+	 *
+	 *  Range: -127 to +20. May be set to @ref BT_GAP_RSSI_INVALID when the value
+	 *  is not available.
+	 */
 	int8_t rssi;
 
-	/** Transmit power of the advertiser. */
+	/** @brief Transmit power of the advertiser in dBm.
+	 *
+	 *  Range: -127 to +20. May be set to @ref BT_GAP_TX_POWER_INVALID when the
+	 *  value is not available.
+	 */
 	int8_t tx_power;
 
 	/**
@@ -2726,7 +2659,7 @@ int bt_le_filter_accept_list_clear(void);
  * channels are bad or unknown by setting the corresponding bit in the channel map to respectively
  * 0 or 1.
  *
- * @note The interval between two succesive calls to this function must be at least one second.
+ * @note The interval between two successive calls to this function must be at least one second.
  *
  * @param chan_map Channel map. 5 octets where each bit represents a channel. Only the lower 37 bits
  *        are valid.

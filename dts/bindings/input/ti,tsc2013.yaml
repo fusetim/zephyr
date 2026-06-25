@@ -1,0 +1,13 @@
+# Copyright (c) 2026 FuseTim
+# SPDX-License-Identifier: Apache-2.0
+
+description: Texas Instruments TSC 2013
+compatible: "ti,tsc2013"
+
+include: [i2c-device.yaml, touchscreen-common.yaml]
+
+properties:
+  irq-gpios:
+    type: phandle-array
+  reset-gpios:
+    type: phandle-array

@@ -1,0 +1,50 @@
+# STM32U5G9J DISCOVERY board configuration
+
+# Copyright (c) 2026 FuseTim
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_STM32U5G9J_DK2
+
+# Enable Neochrom GPU2D graphic acceleration using nemaGFX
+if LVGL
+
+configdefault GRAPHICS_ACCELERATOR
+	default y
+
+if NEOCHROM_GPU2D
+
+configdefault LV_ATTRIBUTE_MEM_ALIGN_SIZE
+	default 8 if NEOCHROM_GPU2D
+
+configdefault LV_Z_NEMA_GFX_MULTI_THREAD
+	default y if LV_USE_NEMA_GFX
+
+configdefault LV_USE_NEMA_GFX
+	default y
+
+if LV_USE_VECTOR_GRAPHIC
+configdefault LV_USE_NEMA_VG
+	default y
+
+configdefault LV_NEMA_GFX_MAX_RESX
+    default 800
+
+configdefault LV_NEMA_GFX_MAX_RESY
+    default 480
+endif # LV_USE_VECTOR_GRAPHIC
+
+choice LV_USE_NEMA_HAL
+	default LV_NEMA_HAL_CUSTOM
+endchoice
+
+choice LV_USE_NEMA_LIB
+	default LV_NEMA_LIB_M33_NEMAPVG if LV_USE_NEMA_VG
+    default LV_NEMA_LIB_M33_REVC if !LV_USE_NEMA_VG
+endchoice
+
+configdefault LV_NEMA_USE_CACHE
+	default n 
+
+endif # NEOCHROM_GPU2D
+endif # LVGL
+endif # BOARD_STM32U5G9J_DK2

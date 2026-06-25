@@ -1,0 +1,31 @@
+# STM32U5G9J DISCOVERY KIT 2 board configuration
+
+# Copyright (c) 2026 FuseTim
+# SPDX-License-Identifier: Apache-2.0
+
+if BOARD_STM32U5G9J_DK2
+
+if LVGL
+
+config LV_USE_DRAW_DMA2D
+	default y
+
+config LV_DRAW_DMA2D_HAL_INCLUDE
+	default "stm32u5xx.h"
+
+config STM32_LTDC_FB_NUM
+	default 0
+
+config LV_Z_VDB_SIZE
+	default 100
+
+config LV_Z_DOUBLE_VDB
+	default y
+
+choice LV_Z_RENDERING_MODE
+	default LV_Z_DIRECT_RENDERING
+endchoice
+
+endif # LVGL
+
+endif # BOARD_STM32U5G9J_DK2
